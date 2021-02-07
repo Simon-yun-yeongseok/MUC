@@ -47,8 +47,8 @@ parser.add_argument('--beta', default=0.25, type=float, help='Beta for distiallt
 parser.add_argument('--resume', default='True', action='store_true', help='resume from checkpoint')
 parser.add_argument('--random_seed', default=1988, type=int, help='random seed')
 parser.add_argument('--cuda', default=True, help='enables cuda')
-parser.add_argument('--side_classifier', default=3, type=int, help='multiple classifiers')
-parser.add_argument('--Stage3_flag', default='True', action='store_true', help='multiple classifiers')
+parser.add_argument('--side_classifier', default=1, type=int, help='multiple classifiers')
+parser.add_argument('--Stage3_flag', default='False', action='store_true', help='multiple classifiers')
 parser.add_argument('--memory_budget', default=2000, type=int, help='Exemplars of old classes')
 args = parser.parse_args()
 
@@ -76,7 +76,7 @@ save_epoch             = 2             # save the model in every save_epoch(init
 np.random.seed(args.random_seed)        # Fix the random seed
 print(args)
 Stage1_flag = True  # Train new model and new classifier
-Stage3_flag = True  # Train side classifiers with Maximum Classifier Discrepancy
+Stage3_flag = False  # Train side classifiers with Maximum Classifier Discrepancy
 ########################################
 transform_train = transforms.Compose([
     transforms.RandomCrop(32, padding=4),
@@ -282,11 +282,6 @@ for n_run in range(args.nb_runs):
                 # evaluate the val set
                 if (epoch + 1) % val_epoch == 0:
                     tg_model.eval()
-                    # if iteration>start_iter:
-                    #     ## joint classifiers
-                    #     #num_old_classes = ref_model.fc.out_features
-                    #     tg_model.fc.weight.data[:num_old_classes] = ref_model.fc.weight.data
-                    #     tg_model.fc.bias.data[:num_old_classes] = ref_model.fc.bias.data
                     print("##############################################################")
                     # Calculate validation error of model on the original classes:
                     map_Y_valid_ori = np.array([order_list.index(i) for i in Y_valid_ori])
@@ -297,9 +292,6 @@ for n_run in range(args.nb_runs):
                     eval_subset = torch.utils.data.TensorDataset(X_eval_sub, map_Y_eval_sub)
                     evalloader = torch.utils.data.DataLoader(eval_subset, batch_size=train_batch_size, shuffle=True, num_workers=2)
                     
-                    # evalset.test_data = X_valid_ori.astype('uint8')
-                    # evalset.test_labels = map_Y_valid_ori
-                    # evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size, shuffle=False, num_workers=2)
                     acc_old = compute_accuracy_WI(tg_model, evalloader, 0, args.nb_cl*(iteration+1))
                     print('Old classes accuracy: {:.2f} %'.format(acc_old))
                     ##
@@ -308,10 +300,6 @@ for n_run in range(args.nb_runs):
                     Y_valid_cur = Y_valid_total[indices_test_subset_cur]
                     map_Y_valid_cur = np.array([order_list.index(i) for i in Y_valid_cur])
                     # print('Computing accuracy on the original batch of classes...')
-                    
-                    # evalset.test_data = X_valid_cur.astype('uint8')
-                    # evalset.test_labels = map_Y_valid_cur
-                    # evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size, shuffle=False, num_workers=2)
                     
                     X_eval_sub = torch.tensor(X_valid_cur, dtype=torch.float32)
                     map_Y_eval_sub = torch.tensor(map_Y_valid_cur, dtype=torch.long)

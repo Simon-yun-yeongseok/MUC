@@ -54,7 +54,7 @@ parser.add_argument('--resume', default='True', action='store_true', help='resum
 parser.add_argument('--random_seed', default=1988, type=int, help='random seed')
 parser.add_argument('--cuda', default=True, help='enables cuda')
 parser.add_argument('--side_classifier', default=1, type=int, help='multiple classifiers') ##default 3
-parser.add_argument('--Stage3_flag', default='True', action='store_true', help='multiple classifiers')
+parser.add_argument('--Stage3_flag', default='False', action='store_true', help='multiple classifiers')
 parser.add_argument('--memory_budget', default=2000, type=int, help='Exemplars of old classes')
 args = parser.parse_args()
 
@@ -68,7 +68,7 @@ def variable(t: torch.Tensor, use_cuda=True, **kwargs):
 ########################################
 assert(args.nb_cl_fg % args.nb_cl == 0)
 assert(args.nb_cl_fg >= args.nb_cl)
-train_batch_size       = 128            # Batch size for train
+train_batch_size       = 128            # Batch size for train(Initial = 128)
 test_batch_size        = 100            # Batch size for test
 eval_batch_size        = 100            # Batch size for eval
 base_lr                = 0.1            # Initial learning rate
@@ -76,19 +76,16 @@ lr_strat               = [120, 160, 180]      # Epochs where learning rate gets 
 lr_factor              = 0.1            # Learning rate decrease factor
 custom_weight_decay    = 5e-4           # Weight Decay
 custom_momentum        = 0.9            # Momentum
-epochs                 = 10            # initial = 200
-val_epoch              = 2             # evaluate the model in every val_epoch(initial = 10)
+epochs                 = 4            # initial = 200
+val_epoch              = 1             # evaluate the model in every val_epoch(initial = 10)
 save_epoch             = 2             # save the model in every save_epoch(initial = 50)
 np.random.seed(args.random_seed)        # Fix the random seed
 print(args)
 Stage1_flag = True  # Train new model and new classifier
 Stage3_flag = False  # Train side classifiers with Maximum Classifier Discrepancy  Initial : True
 ########################################
-accuracy_test = TEST(epochs, val_epoch, args.num_classes, args.nb_cl)
-# print(epochs/val_epoch)
-# print(args.num_classes/args.nb_cl)
-# print(np.zeros((int(epochs/val_epoch), int(args.num_classes/args.nb_cl))))
-# exit()
+# accuracy_test = TEST(epochs, val_epoch, args.num_classes, args.nb_cl)
+
 transform_train = transforms.Compose([
     # transforms.RandomCrop(32, padding=4),
     transforms.RandomHorizontalFlip(),
@@ -114,7 +111,6 @@ evalset = torchvision.datasets.CIFAR100(root=args.dataset_dir, train=False,
 # save accuracy
 top1_acc_list = np.zeros((args.nb_runs, int(args.num_classes/args.nb_cl), int(epochs/val_epoch)))
 top1_acc_old_list = np.zeros((args.nb_runs, int(args.num_classes/args.nb_cl), int(epochs/val_epoch)))
-top1_acc_cur_1_list = np.zeros((args.nb_runs, int(args.num_classes/args.nb_cl), int(epochs/val_epoch)))
 top1_acc_cur_list = np.zeros((args.nb_runs, int(args.num_classes/args.nb_cl), int(epochs/val_epoch)))
 
 
@@ -189,7 +185,7 @@ for n_run in range(args.nb_runs):
             indices_test_subset_ori = np.array([i in order[range(0, iteration*args.nb_cl)] for i in Y_valid_total])
             X_valid_ori = X_valid_total[indices_test_subset_ori]
             Y_valid_ori = Y_valid_total[indices_test_subset_ori]
-            
+        
         if iteration == start_iter:
             # base classes
             tg_model = resnet_model.resnet32_custom(num_classes=args.nb_cl, side_classifier=args.side_classifier)
@@ -250,23 +246,23 @@ for n_run in range(args.nb_runs):
                         loss_distill_main = -torch.mean(torch.sum(soft_target * logp, dim=1))
 
                         # # # distillation loss for side classifiers
-                        outputs_side = tg_model(inputs, side_fc=True)
-                        outputs_old_side = ref_model(inputs, side_fc=True)
-                        ## discrepancy loss
-                        index = args.nb_cl * args.side_classifier * (iteration-1)
-                        loss_distill_side = 0
-                        if args.side_classifier > 1:
-                            for iter_1 in range(args.side_classifier):
-                                # outputs_old_side_each = outputs_old_side[:, (index + args.nb_cl * iter_1):(index + args.nb_cl * (iter_1 + 1))]
-                                outputs_old_side_each = outputs_old_side
-                                soft_target_side = F.softmax(outputs_old_side_each / args.T, dim=1)
-                                # print("soft_target_side {}".format(soft_target_side.shape))
-                                outputs_side_each = outputs_side[:, (index + args.nb_cl * iter_1):(index + args.nb_cl * (iter_1 + 1))]### 현재 task의 output
-                                # print("outputs_side_each {}".format(outputs_side_each.shape))
+                        # outputs_side = tg_model(inputs, side_fc=True)
+                        # outputs_old_side = ref_model(inputs, side_fc=True)
+                        # ## discrepancy loss
+                        # index = args.nb_cl * args.side_classifier * (iteration-1)
+                        # loss_distill_side = 0
+                        # if args.side_classifier > 1:
+                        #     for iter_1 in range(args.side_classifier):
+                        #         # outputs_old_side_each = outputs_old_side[:, (index + args.nb_cl * iter_1):(index + args.nb_cl * (iter_1 + 1))]
+                        #         outputs_old_side_each = outputs_old_side
+                        #         soft_target_side = F.softmax(outputs_old_side_each / args.T, dim=1)
+                        #         # print("soft_target_side {}".format(soft_target_side.shape))
+                        #         outputs_side_each = outputs_side[:, (index + args.nb_cl * iter_1):(index + args.nb_cl * (iter_1 + 1))]### 현재 task의 output
+                        #         # print("outputs_side_each {}".format(outputs_side_each.shape))
                                 
-                                logp_side = F.log_softmax(outputs_side_each / args.T, dim=1)############### output tensor dimmension problem
-                                loss_distill_side += -torch.mean(torch.sum(soft_target_side * logp_side, dim=1))
-                            loss_distill_side = loss_distill_side / args.side_classifier
+                        #         logp_side = F.log_softmax(outputs_side_each / args.T, dim=1)############### output tensor dimmension problem
+                        #         loss_distill_side += -torch.mean(torch.sum(soft_target_side * logp_side, dim=1))
+                        #     loss_distill_side = loss_distill_side / args.side_classifier
                         alpha = float(iteration) / float(iteration + 1)
                         # loss = (1-alpha) * loss_cls + alpha * (loss_distill_main + loss_distill_side)
                         loss = (1-alpha) * loss_cls + alpha * loss_distill_main
@@ -282,64 +278,73 @@ for n_run in range(args.nb_runs):
                 else:
                     print('Epoch: %d, LR: %.4f, loss_cls: %.4f, loss_distill_main: %.4f' % (epoch, 
                     tg_lr_scheduler.get_lr()[0], loss_cls.item(), loss_distill_main.item()))
-
+                
                 # evaluate the val set
                 if (epoch + 1) % val_epoch == 0:
                     tg_model.eval()
-                    # if iteration>start_iter:
-                    #     ## joint classifiers
-                    #     num_old_classes = ref_model.fc.out_features
-                    #     tg_model.fc.weight.data[:num_old_classes] = ref_model.fc.weight.data
-                    #     tg_model.fc.bias.data[:num_old_classes] = ref_model.fc.bias.data
                     print("##############################################################")
-                    # Calculate validation error of model on the original classes:
-                    map_Y_valid_ori = np.array([order_list.index(i) for i in Y_valid_ori])
+                    # Calculate validation accuracy of model on the current classes:
+                    for i in range(iteration):
+                        print("iteration :{}".format(i))
+                        indices_valid_subset_old = np.array([j in order[range(0, (i+1) * args.nb_cl)] for j in Y_valid_total])
+                        X_valid_old = X_valid_total[indices_test_subset_cur]
+                        Y_valid_old = Y_valid_total[indices_test_subset_cur]
+                        map_Y_valid_old = np.array([order_list.index(j) for j in Y_valid_old]) 
+                        X_eval_sub = torch.tensor(X_valid_old, dtype=torch.float32)
+                        map_Y_eval_sub = torch.tensor(map_Y_valid_old, dtype=torch.long)
+                        Labels = np.sort(Y_valid_old)
+                        print('old labels: {}'.format(Labels))
+                        print('Min and Max of mapped eval old labels: {}, {}'.format(min(map_Y_valid_old), max(map_Y_valid_old)))
+
+                        eval_subset = torch.utils.data.TensorDataset(X_eval_sub, map_Y_eval_sub)
+                        evalloader = torch.utils.data.DataLoader(eval_subset, batch_size=train_batch_size, shuffle=False, num_workers=2)
+                        acc_old = compute_accuracy_WI(tg_model, evalloader, 0, args.nb_cl) 
+                        print('Current classes accuracy: {:.2f} %'.format(acc_old))
+                        top1_acc_old_list[n_run, iteration, int((epoch + 1)/val_epoch)-1] = np.array(acc_old) ####
+                        # print(top1_acc_old_list)
+
+                    # # Calculate validation error of model on the original classes:
+                    # map_Y_valid_ori = np.array([order_list.index(i) for i in Y_valid_ori])
+                    # print('Computing accuracy on the old batch of classes...')
+                    # X_eval_sub = torch.tensor(X_valid_ori, dtype=torch.float32)
+                    # map_Y_eval_sub = torch.tensor(map_Y_valid_ori, dtype=torch.long)
+                    # eval_subset = torch.utils.data.TensorDataset(X_eval_sub, map_Y_eval_sub)
+                    # evalloader = torch.utils.data.DataLoader(eval_subset, batch_size=train_batch_size, shuffle=False, num_workers=2)
+                    # acc_old = compute_accuracy_WI(tg_model, evalloader, 0, args.nb_cl*(iteration+1))
+                    # top1_acc_old_list[n_run, iteration, int((epoch + 1)/val_epoch)-1] = np.array(acc_old)
+                    # print(top1_acc_old_list)
+                    # print('Old classes accuracy: {:.2f} %'.format(acc_old))
+
+
+                    # Calculate validation accuracy of model on the current classes:
                     print('Computing accuracy on the original batch of classes...')
-                    
-                    X_eval_sub = torch.tensor(X_valid_ori, dtype=torch.float32)
-                    map_Y_eval_sub = torch.tensor(map_Y_valid_ori, dtype=torch.long)
-                    eval_subset = torch.utils.data.TensorDataset(X_eval_sub, map_Y_eval_sub)
-                    evalloader = torch.utils.data.DataLoader(eval_subset, batch_size=train_batch_size, shuffle=False, num_workers=2)
-                    
-                    # print('Min and Max of eval old labels: {}, {}'.format(min(map_Y_eval_sub), max(map_Y_eval_sub)))
-                    acc_old = compute_accuracy_WI(tg_model, evalloader, 0, args.nb_cl*(iteration+1))
-
-                    print('Old classes accuracy: {:.2f} %'.format(acc_old))
-                    top1_acc_old_list[n_run, iteration, int((epoch + 1)/val_epoch)-1] = np.array(acc_old) 
-
                     indices_test_subset_cur = np.array([i in order[range(iteration * args.nb_cl, (iteration+1) * args.nb_cl)] for i in Y_valid_total])
                     X_valid_cur = X_valid_total[indices_test_subset_cur]
                     Y_valid_cur = Y_valid_total[indices_test_subset_cur]
-                    map_Y_valid_cur = np.array([order_list.index(i) for i in Y_valid_cur])  ### mapping 0~19
-
+                    map_Y_valid_cur = np.array([order_list.index(i) for i in Y_valid_cur]) 
                     X_eval_sub = torch.tensor(X_valid_cur, dtype=torch.float32)
                     map_Y_eval_sub = torch.tensor(map_Y_valid_cur, dtype=torch.long)
                     print('Min and Max of eval current labels: {}, {}'.format(min(map_Y_eval_sub), max(map_Y_eval_sub)))
+
                     eval_subset = torch.utils.data.TensorDataset(X_eval_sub, map_Y_eval_sub)
                     evalloader = torch.utils.data.DataLoader(eval_subset, batch_size=train_batch_size, shuffle=False, num_workers=2)
-
                     acc_cur = compute_accuracy_WI(tg_model, evalloader, 0, args.nb_cl) 
-                    acc_cur_1 = accuracy_test.compute_accuracy_test(tg_model, evalloader, args.nb_cl, args.side_classifier)
-                    
-                    print('New classes accuracy: {:.2f} %'.format(acc_cur))
-                    top1_acc_cur_list[n_run, iteration, int((epoch + 1)/val_epoch)-1] = np.array(acc_cur)
-                    top1_acc_cur_1_list[n_run, iteration, int((epoch + 1)/val_epoch)-1] = np.array(acc_cur)
-
-
-                    # Calculate validation error of model on the cumul of classes:
-                    acc = compute_accuracy_WI(tg_model, testloader, 0, args.nb_cl*(iteration+1))
-                    print('Total accuracy: {:.2f} %'.format(acc))
+                    print('Current classes accuracy: {:.2f} %'.format(acc_cur))
+                    top1_acc_cur_list[n_run, iteration, int((epoch + 1)/val_epoch)-1] = np.array(acc_cur) ####
+                    # print(top1_acc_cur_list)
                     print("##############################################################")
+                    
+                    # Calculate total accuracy of current model:
+                    acc = compute_accuracy_WI(tg_model, testloader, 0, args.nb_cl*(iteration+1))
+                    top1_acc_list[n_run, iteration, int((epoch + 1)/val_epoch)-1] = np.array(acc)
+                    print('Total accuracy: {:.2f} %'.format(acc))
                     tg_model.train()
-                    ## record accuracy
-                    top1_acc_list[n_run, iteration, int((epoch + 1)/val_epoch)-1] = np.array(acc) ####
-                    top_acc_test = acc.max
-                    print(top_acc_test)
-                    exit()
-                    correct = np.zeros((int(epochs/val_epoch), int(num_classes/nb_cl)))
-                    for i in range(int(epochs/val_epoch)):
-                        for j in range(int(args.num_classes/args.nb_cl)):
-                            correct[i][j] = predicted1.eq(targets).sum().item()
+                    print(top1_acc_old_list)
+                    print()
+                    print(top1_acc_cur_list)
+                    print()
+                    print(top1_acc_list)
+                    print("##############################################################")
 
                 # Save the val set
                 if (epoch + 1) % save_epoch == 0:
