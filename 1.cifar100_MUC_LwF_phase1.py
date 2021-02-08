@@ -77,7 +77,7 @@ lr_factor              = 0.1            # Learning rate decrease factor
 custom_weight_decay    = 5e-4           # Weight Decay
 custom_momentum        = 0.9            # Momentum
 epochs                 = 4            # initial = 200
-val_epoch              = 1             # evaluate the model in every val_epoch(initial = 10)
+val_epoch              = 2             # evaluate the model in every val_epoch(initial = 10)
 save_epoch             = 2             # save the model in every save_epoch(initial = 50)
 np.random.seed(args.random_seed)        # Fix the random seed
 print(args)
@@ -110,9 +110,15 @@ evalset = torchvision.datasets.CIFAR100(root=args.dataset_dir, train=False,
 
 # save accuracy
 top1_acc_list = np.zeros((args.nb_runs, int(args.num_classes/args.nb_cl), int(epochs/val_epoch)))
+old_val_list = np.zeros(int(args.num_classes/args.nb_cl))
+acc_old_list = np.zeros((int(args.num_classes/args.nb_cl), int(args.num_classes/args.nb_cl), int(epochs/val_epoch)))
 top1_acc_old_list = np.zeros((args.nb_runs, int(args.num_classes/args.nb_cl), int(epochs/val_epoch)))
 top1_acc_cur_list = np.zeros((args.nb_runs, int(args.num_classes/args.nb_cl), int(epochs/val_epoch)))
 
+
+# old_val_list = np.zeros(int(args.num_classes/args.nb_cl))
+                        # acc_old_list = np.zeros((int(args.num_classes/args.nb_cl), int(args.num_classes/args.nb_cl), int(epochs/val_epoch)))
+                        # top1_acc_old_list = np.zeros((args.nb_runs, int(args.num_classes/args.nb_cl), int(epochs/val_epoch)))
 
 X_train_total = np.array(trainset.data)
 Y_train_total = np.array(trainset.targets)
@@ -208,7 +214,7 @@ for n_run in range(args.nb_runs):
             new_fc.weight.data[:num_old_classes] = ref_model.fc.weight.data
             new_fc.bias.data[:num_old_classes] = ref_model.fc.bias.data
             tg_model.fc = new_fc
-            
+                    
 
 ########### Stage 1: Train Multiple Classifiers for each iteration #################
         if Stage1_flag is True:
@@ -270,7 +276,7 @@ for n_run in range(args.nb_runs):
                     tg_optimizer.zero_grad()
                     loss.backward()
                     tg_optimizer.step()
-                    # tg_lr_scheduler.step()  ###ㅣlearning rate
+                    tg_lr_scheduler.step()  ###ㅣlearning rate
 
                 if iteration==start_iter:
                     print('Epoch: %d, LR: %.4f, loss_cls: %.4f' % (epoch, tg_lr_scheduler.get_last_lr()[0], loss_cls.item()))
@@ -284,25 +290,33 @@ for n_run in range(args.nb_runs):
                     tg_model.eval()
                     print("##############################################################")
                     # Calculate validation accuracy of model on the current classes:
-                    for i in range(iteration):
+                    for i in range(iteration+1):
                         print("iteration :{}".format(i))
-                        indices_valid_subset_old = np.array([j in order[range(0, (i+1) * args.nb_cl)] for j in Y_valid_total])
-                        X_valid_old = X_valid_total[indices_test_subset_cur]
-                        Y_valid_old = Y_valid_total[indices_test_subset_cur]
+                        indices_valid_subset_old = np.array([j in order[range(i * args.nb_cl, (i+1) * args.nb_cl)] for j in Y_valid_total])
+                        X_valid_old = X_valid_total[indices_valid_subset_old]
+                        Y_valid_old = Y_valid_total[indices_valid_subset_old]
                         map_Y_valid_old = np.array([order_list.index(j) for j in Y_valid_old]) 
                         X_eval_sub = torch.tensor(X_valid_old, dtype=torch.float32)
                         map_Y_eval_sub = torch.tensor(map_Y_valid_old, dtype=torch.long)
-                        Labels = np.sort(Y_valid_old)
-                        print('old labels: {}'.format(Labels))
                         print('Min and Max of mapped eval old labels: {}, {}'.format(min(map_Y_valid_old), max(map_Y_valid_old)))
 
                         eval_subset = torch.utils.data.TensorDataset(X_eval_sub, map_Y_eval_sub)
                         evalloader = torch.utils.data.DataLoader(eval_subset, batch_size=train_batch_size, shuffle=False, num_workers=2)
                         acc_old = compute_accuracy_WI(tg_model, evalloader, 0, args.nb_cl) 
-                        print('Current classes accuracy: {:.2f} %'.format(acc_old))
-                        top1_acc_old_list[n_run, iteration, int((epoch + 1)/val_epoch)-1] = np.array(acc_old) ####
-                        # print(top1_acc_old_list)
-
+                        print('Old classes accuracy: {}, {:.2f} %'.format((i),(acc_old)))
+                        
+                        # if old_val_list[i] <= np.array(acc_old):
+                        #     old_val_list[i] = np.array(acc_old)
+                        #     top1_acc_old_list[n_run, i, int((epoch + 1)/val_epoch)-1] = old_val_list[i]
+                        # else:
+                        #     top1_acc_old_list[n_run, i, int((epoch + 1)/val_epoch)-1] = old_val_list[i]
+                        # print(old_val_list)
+                        
+                        old_val_list[i] = np.array(acc_old)
+                        old_val_list = np.maximum(old_val_list,a)
+                        a = copy.deepcopy(old_val_list)
+                    # top1_acc_old_list[n_run, iteration, int(args.num_classes/args.nb_cl)-1] = old_val_list
+                    top1_acc_old_list[n_run, iteration, int((epoch + 1)/val_epoch)-1] = old_val_list[:,int((epoch + 1)/val_epoch)-1]
                     # # Calculate validation error of model on the original classes:
                     # map_Y_valid_ori = np.array([order_list.index(i) for i in Y_valid_ori])
                     # print('Computing accuracy on the old batch of classes...')
@@ -345,6 +359,14 @@ for n_run in range(args.nb_runs):
                     print()
                     print(top1_acc_list)
                     print("##############################################################")
+                    
+                    
+
+
+                
+                acc_old_list[iteration,i,int((epoch + 1)/val_epoch)-1] = np.array(acc_old)
+                acc_old_list = np.zeros((int(args.num_classes/args.nb_cl), int(args.num_classes/args.nb_cl), int(epochs/val_epoch)))
+                top1_acc_old_list = np.zeros((args.nb_runs, int(args.num_classes/args.nb_cl), int(epochs/val_epoch)))
 
                 # Save the val set
                 if (epoch + 1) % save_epoch == 0:
