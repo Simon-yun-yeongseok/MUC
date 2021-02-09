@@ -53,8 +53,8 @@ parser.add_argument('--beta', default=0.25, type=float, help='Beta for distiallt
 parser.add_argument('--resume', default='True', action='store_true', help='resume from checkpoint')
 parser.add_argument('--random_seed', default=1988, type=int, help='random seed')
 parser.add_argument('--cuda', default=True, help='enables cuda')
-parser.add_argument('--side_classifier', default=0, type=int, help='multiple classifiers') ##default 3
-parser.add_argument('--Stage3_flag', default='False', action='store_true', help='multiple classifiers')
+parser.add_argument('--side_classifier', default=3, type=int, help='multiple classifiers') ##default 3
+parser.add_argument('--Stage3_flag', default='True', action='store_true', help='multiple classifiers')
 parser.add_argument('--memory_budget', default=2000, type=int, help='Exemplars of old classes')
 args = parser.parse_args()
 
@@ -76,13 +76,13 @@ lr_strat               = [120, 160, 180]      # Epochs where learning rate gets 
 lr_factor              = 0.1            # Learning rate decrease factor
 custom_weight_decay    = 5e-4           # Weight Decay
 custom_momentum        = 0.9            # Momentum
-epochs                 = 200            # initial = 200
-val_epoch              = 10             # evaluate the model in every val_epoch(initial = 10)
-save_epoch             = 50             # save the model in every save_epoch(initial = 50)
+epochs                 = 20            # initial = 200
+val_epoch              = 5             # evaluate the model in every val_epoch(initial = 10)
+save_epoch             = 10             # save the model in every save_epoch(initial = 50)
 np.random.seed(args.random_seed)        # Fix the random seed
 print(args)
 Stage1_flag = True  # Train new model and new classifier
-Stage3_flag = False  # Train side classifiers with Maximum Classifier Discrepancy  Initial : True
+Stage3_flag = True  # Train side classifiers with Maximum Classifier Discrepancy  Initial : True
 ########################################
 
 transform_train = transforms.Compose([
@@ -109,9 +109,11 @@ evalset = torchvision.datasets.CIFAR100(root=args.dataset_dir, train=False,
 top1_acc_list = np.zeros((args.nb_runs, int(args.num_classes/args.nb_cl), int(epochs/val_epoch)))
 old_val_list = np.zeros(int(args.num_classes/args.nb_cl))
 old_val_list_sub = np.zeros(int(args.num_classes/args.nb_cl))
-acc_old_list = np.zeros((int(args.num_classes/args.nb_cl), int(args.num_classes/args.nb_cl), int(epochs/val_epoch)))
+stage1_acc_list = np.zeros((int(args.num_classes/args.nb_cl), int(args.num_classes/args.nb_cl)))
 
-top1_acc_old_list = np.zeros((int(args.num_classes/args.nb_cl), int(args.num_classes/args.nb_cl)))
+stage3_old_val_list = np.zeros(int(args.num_classes/args.nb_cl))
+stage3_old_val_list_sub = np.zeros(int(args.num_classes/args.nb_cl))
+stage3_acc_list = np.zeros((int(args.num_classes/args.nb_cl), int(args.num_classes/args.nb_cl)))
 top1_acc_cur_list = np.zeros((args.nb_runs, int(args.num_classes/args.nb_cl), int(epochs/val_epoch)))
 
 X_train_total = np.array(trainset.data)
@@ -210,7 +212,16 @@ for n_run in range(args.nb_runs):
             tg_model.fc = new_fc
             for param in tg_model.fc.parameters():
                 param.requires_grad = True
-                    
+            
+            ## new side classifier
+            num_old_classes_side = ref_model.fc_side.out_features
+            in_features = ref_model.fc.in_features # dim
+            new_fc_side = nn.Linear(in_features, args.side_classifier*args.nb_cl*(iteration+1)).cuda()
+            new_fc_side.weight.data[:num_old_classes_side] = ref_model.fc_side.weight.data
+            new_fc_side.bias.data[:num_old_classes_side] = ref_model.fc_side.bias.data
+            tg_model.fc_side = new_fc_side
+            for param in tg_model.parameters():
+                param.requires_grad = True
 
 ########### Stage 1: Train Multiple Classifiers for each iteration #################
         if Stage1_flag is True:
@@ -222,9 +233,7 @@ for n_run in range(args.nb_runs):
             tg_lr_scheduler = lr_scheduler.MultiStepLR(tg_optimizer, milestones=lr_strat, gamma=lr_factor)
             cls_criterion = nn.CrossEntropyLoss()
             cls_criterion.to(device)
-            
             for epoch in range(epochs):
-                
                 for batch_idx, (inputs, targets) in enumerate(trainloader):
                     if args.cuda:
                         inputs = inputs.to(device)
@@ -247,9 +256,24 @@ for n_run in range(args.nb_runs):
                         soft_target = F.softmax(old_outputs / args.T, dim=1)
                         logp = F.log_softmax(outputs[:, :num_old_classes] / args.T, dim=1)
                         loss_distill_main = -torch.mean(torch.sum(soft_target * logp, dim=1))
+                        
+                        # # # distillation loss for side classifiers
+                        outputs_side = tg_model(inputs, side_fc=True)
+                        outputs_old_side = ref_model(inputs, side_fc=True)
+                        ## discrepancy loss
+                        index = args.nb_cl * args.side_classifier * (iteration-1)
+                        loss_distill_side = 0
+                        if args.side_classifier > 1:
+                            for iter_1 in range(args.side_classifier):
+                                outputs_old_side_each = outputs_old_side[:, (index + args.nb_cl * iter_1):(index + args.nb_cl * (iter_1 + 1))]
+                                soft_target_side = F.softmax(outputs_old_side_each / args.T, dim=1)
+                                outputs_side_each = outputs_side[:, (index + args.nb_cl * iter_1):(index + args.nb_cl * (iter_1 + 1))]
+                                logp_side = F.log_softmax(outputs_side_each / args.T, dim=1)
+                                loss_distill_side += -torch.mean(torch.sum(soft_target_side * logp_side, dim=1))
+                            loss_distill_side = loss_distill_side / args.side_classifier
                         alpha = float(iteration) / float(iteration + 1)
-                        loss = (1-alpha) * loss_cls + alpha * loss_distill_main
-                
+                        loss = (1-alpha) * loss_cls + alpha * (loss_distill_main + loss_distill_side)
+
                 tg_optimizer.zero_grad()
                 loss.backward()
                 tg_optimizer.step()
@@ -289,7 +313,7 @@ for n_run in range(args.nb_runs):
                         old_val_list = np.maximum(old_val_list,old_val_list_sub)
                     
                     for i in range(iteration +1):
-                        top1_acc_old_list[iteration, i] = old_val_list[i]
+                        stage1_acc_list[iteration, i] = old_val_list[i]
 
                     # Calculate validation accuracy of model on the current classes:
                     # print('Computing accuracy on the original batch of classes...')
@@ -319,11 +343,11 @@ for n_run in range(args.nb_runs):
                     acc = compute_accuracy_WI(tg_model, testloader, 0, args.nb_cl*(iteration+1))
                     top1_acc_list[n_run, iteration, int((epoch + 1)/val_epoch)-1] = np.array(acc)
                     # print('Total accuracy: {:.2f} %'.format(acc))
-                    # top1_acc_old_list[iteration, iteration] = np.array(acc)
-                    top1_acc_old_list[iteration, iteration] = np.array(acc_cur)
+                    # stage1_acc_list[iteration, iteration] = np.array(acc)
+                    stage1_acc_list[iteration, iteration] = np.array(acc_cur)
 
                     tg_model.train()
-                    print(top1_acc_old_list)
+                    print(stage1_acc_list)
                     # print(top1_acc_cur_list)
                     # print()
                     # print(top1_acc_list)
@@ -336,15 +360,125 @@ for n_run in range(args.nb_runs):
                     ckp_name = os.path.join(ckp_prefix + 'MCD_ResNet32_Model_run_{}_step_{}.pth'.format(n_run, iteration))
                     file = open('{}'.format(ckp_name),'w')
                     torch.save(tg_model.state_dict(), ckp_name)
-        
+
+                    
+########## Stage 3: Maximum Classifier Discrepancy for each iteration #################
+        if Stage3_flag is True:
+            print("Stage 3: Train Side Classifiers with Maximum Classifier Discrepancy for iteration {}".format(iteration))
+            ##
+            stage3_model = copy.deepcopy(tg_model)
+            start_index = args.nb_cl * args.side_classifier * iteration
+            # print("Initialize Side Classifiers with Main Classifier")
+            # for i in range(args.side_classifier):
+            #     stage3_model.fc_side.weight.data[(start_index + args.nb_cl * i):(start_index + args.nb_cl * (i + 1))] = stage3_model.fc.weight.data[num_old_classes:]
+            #     stage3_model.fc_side.bias.data[(start_index + args.nb_cl * i):(start_index + args.nb_cl * (i + 1))] = stage3_model.fc.bias.data[num_old_classes:]
+            stage3_model = stage3_model.to(device)
+            stage3_model.eval()
+            stage3_model.fc_side.train()
+            ## fix feature extractor and main classifier
+            for n, p in stage3_model.named_parameters():
+                if 'fc_side' in n:
+                    p.requires_grad = True
+                else:
+                    p.requires_grad = False
+            stage3_lr_strat = [40, 60, 70]
+            stage3_epochs = 80
+            stage3_params = list(stage3_model.fc_side.parameters())
+            stage3_optimizer = optim.SGD(stage3_params, lr=base_lr, momentum=custom_momentum,weight_decay=custom_weight_decay)
+            stage3_lr_scheduler = lr_scheduler.MultiStepLR(stage3_optimizer, milestones=stage3_lr_strat, gamma=lr_factor)
+            cls_criterion = nn.CrossEntropyLoss()
+            cls_criterion.to(device)
+            ## Train
+            for stage3_epoch in range(stage3_epochs):
+                # select a subset of SVHN data
+                idx = torch.randperm(svhn_num)
+                svhn_data_copy = svhn_data_copy[idx]
+                svhn_labels_copy = svhn_labels_copy[idx]
+                svhn_data.data = svhn_data_copy[0:len(map_Y_train_sub)]
+                svhn_data.labels = svhn_labels_copy[0:len(map_Y_train_sub)]
+                svhn_loader = torch.utils.data.DataLoader(dataset=svhn_data, batch_size=train_batch_size, shuffle=True, num_workers=2)
+                for ((batch_idx, (inputs, targets)), (batch_idx_unlabel, (inputs_unlabel, targets_unlabel))) in zip(
+                        enumerate(trainloader), enumerate(svhn_loader)):
+                    if args.cuda:
+                        inputs, targets, inputs_unlabel, targets_unlabel = inputs.to(device), targets.to(
+                            device), inputs_unlabel.to(device), targets_unlabel.to(device)
+
+                    targets = targets - args.nb_cl * iteration
+                    loss_cls = 0
+                    outputs = stage3_model(inputs, side_fc=True)
+                    for i in range(args.side_classifier):
+                        loss_cls += cls_criterion(outputs[:, (start_index + args.nb_cl * i):(start_index + args.nb_cl * (i + 1))], targets)
+
+                    ## discrepancy loss
+                    outputs_unlabel = stage3_model(inputs_unlabel, side_fc=True)
+                    loss_discrepancy = 0
+                    for iter_1 in range(args.side_classifier):
+                        outputs_unlabel_1 = outputs_unlabel[:, (start_index + args.nb_cl * iter_1):(start_index + args.nb_cl * (iter_1 + 1))]
+                        outputs_unlabel_1 = F.softmax(outputs_unlabel_1, dim=1)
+                        for iter_2 in range(iter_1 + 1, args.side_classifier):
+                            outputs_unlabel_2 = outputs_unlabel[:, (start_index + args.nb_cl * iter_2):(start_index + args.nb_cl * (iter_2 + 1))]
+                            outputs_unlabel_2 = F.softmax(outputs_unlabel_2, dim=1)
+                            #loss_discrepancy += torch.mean(F.relu(1.0 - torch.sum(torch.abs(outputs_unlabel_1 - outputs_unlabel_2), 1)))
+                            loss_discrepancy += torch.mean(torch.mean(torch.abs(outputs_unlabel_1 - outputs_unlabel_2), 1))
+                    loss = loss_cls - loss_discrepancy
+
+                stage3_optimizer.zero_grad()
+                loss.backward()
+                stage3_optimizer.step()
+                stage3_lr_scheduler.step()
+
+                print('Epoch: %d, LR: %.4f, loss_cls: %.4f, loss_discrepancy: %.4f' % (
+                    stage3_epoch, stage3_lr_scheduler.get_lr()[0], loss_cls.item() / args.side_classifier, loss_discrepancy.item()))
+
+                # evaluate the val set
+                if (stage3_epoch + 1) % 10 == 0:
+                    stage3_model.fc_side.eval()
+                    print("##############################################################")
+                    for i in range(iteration):
+                        print("iteration :{}".format(i))
+                        indices_valid_subset_current = np.array([j in order[range(i * args.nb_cl, (i+1) * args.nb_cl)] for j in Y_valid_total])
+                        X_valid_current = X_valid_total[indices_valid_subset_current]
+                        Y_valid_current = Y_valid_total[indices_valid_subset_current]
+                        map_Y_valid_current = np.array([order_list.index(j) for j in Y_valid_current]) 
+                        X_eval_side_sub = torch.tensor(X_valid_current, dtype=torch.float32)
+                        map_Y_eval_side_sub = torch.tensor(map_Y_valid_current, dtype=torch.long)
+                        print('Min and Max of mapped eval current labels: {}, {}'.format(min(map_Y_valid_old), max(map_Y_valid_old)))
+                        eval_side_subset = torch.utils.data.TensorDataset(X_eval_side_sub, map_Y_eval_side_sub)
+                        evalloader = torch.utils.data.DataLoader(eval_side_subset, batch_size=train_batch_size, shuffle=False, num_workers=2)
+                        # acc_old = compute_accuracy_WI(stage3_model, evalloader, 0, args.nb_cl)
+                        stage3_acc_old = compute_accuracy_Version1(stage3_model, evalloader, args.nb_cl, args.side_classifier, iteration) 
+                        print('Old classes(group{}) accuracy: {:.2f} %'.format((iteration),(stage_acc_old)))
+                        # print('Maximum Classifier Discrepancy accuracy: {:.2f} %'.format(acc))
+                        print("##############################################################")
+                        stage3_old_val_list_sub[i] = np.array(stage3_acc_old)
+                        
+                    if epoch+1 == val_epoch:
+                        stage3_old_val_list = copy.deepcopy(stage3_old_val_list_sub)
+                    else:
+                        stage3_old_val_list = np.maximum(stage3_old_val_list,stage3_old_val_list_sub)
+                    
+                    for i in range(iteration +1):
+                        stage3_acc_list[iteration, i] = stage3_old_val_list[i]
+                    stage3_model.fc_side.train()
+
+                if (stage3_epoch + 1) % 40 == 0:
+                    if not os.path.isdir(ckp_prefix):                                                           
+                        os.mkdir(ckp_prefix)
+                    ckp_name = os.path.join(ckp_prefix + 'MCD_ResNet32_Model_run_{}_step_{}.pth').format(n_run, iteration)
+                    torch.save(stage3_model.state_dict(), ckp_name)
+
+            tg_model.fc_side.weight.data[start_index:] = stage3_model.fc_side.weight.data[start_index:]
+            tg_model.fc_side.bias.data[start_index:] = stage3_model.fc_side.bias.data[start_index:]
+########## end of Stage 3
+
 ##################################################################
         # Final save of the results
         print("Save accuracy results for iteration {}".format(iteration))
         ckp_name = os.path.join(ckp_prefix + 'LwF_top1_acc_list_K={}.mat'.format(args.side_classifier))
-        sio.savemat(ckp_name, {'accuracy': top1_acc_old_list})
+        sio.savemat(ckp_name, {'accuracy': stage1_acc_list})
         file.close()
 ##################################################################
 
-##################################################################
+
 
 print("done!!")
