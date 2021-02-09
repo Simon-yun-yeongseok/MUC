@@ -23,7 +23,7 @@ import resnet_model
 import utils_pytorch
 import pandas
 from compute_accuracy import compute_accuracy_WI
-from compute_accuracy import TEST
+from compute_accuracy import compute_accuracy_Version1
 
 
 global device
@@ -72,13 +72,13 @@ train_batch_size       = 128            # Batch size for train(Initial = 128)
 test_batch_size        = 100            # Batch size for test
 eval_batch_size        = 100            # Batch size for eval
 base_lr                = 0.1            # Initial learning rate
-lr_strat               = [120, 160, 180]      # Epochs where learning rate gets decreased
+lr_strat               = [120, 160, 180]      # Epochs where learning rate gets decreased(initial = [120, 160, 180])
 lr_factor              = 0.1            # Learning rate decrease factor
 custom_weight_decay    = 5e-4           # Weight Decay
 custom_momentum        = 0.9            # Momentum
-epochs                 = 20            # initial = 200
-val_epoch              = 5             # evaluate the model in every val_epoch(initial = 10)
-save_epoch             = 10             # save the model in every save_epoch(initial = 50)
+epochs                 = 4            # initial = 200
+val_epoch              = 4             # evaluate the model in every val_epoch(initial = 10)
+save_epoch             = 4             # save the model in every save_epoch(initial = 50)
 np.random.seed(args.random_seed)        # Fix the random seed
 print(args)
 Stage1_flag = True  # Train new model and new classifier
@@ -365,7 +365,7 @@ for n_run in range(args.nb_runs):
 ########## Stage 3: Maximum Classifier Discrepancy for each iteration #################
         if Stage3_flag is True:
             print("Stage 3: Train Side Classifiers with Maximum Classifier Discrepancy for iteration {}".format(iteration))
-            ##
+
             stage3_model = copy.deepcopy(tg_model)
             start_index = args.nb_cl * args.side_classifier * iteration
             # print("Initialize Side Classifiers with Main Classifier")
@@ -391,18 +391,21 @@ for n_run in range(args.nb_runs):
             ## Train
             for stage3_epoch in range(stage3_epochs):
                 # select a subset of SVHN data
-                idx = torch.randperm(svhn_num)
-                svhn_data_copy = svhn_data_copy[idx]
-                svhn_labels_copy = svhn_labels_copy[idx]
-                svhn_data.data = svhn_data_copy[0:len(map_Y_train_sub)]
-                svhn_data.labels = svhn_labels_copy[0:len(map_Y_train_sub)]
-                svhn_loader = torch.utils.data.DataLoader(dataset=svhn_data, batch_size=train_batch_size, shuffle=True, num_workers=2)
+                # idx = torch.randperm(svhn_num)
+                # svhn_data_copy = svhn_data_copy[idx]
+                # svhn_labels_copy = svhn_labels_copy[idx]
+                X_unlabel_sub = svhn_data_copy[0:len(map_Y_train_sub)]
+                map_Y_unlabel_sub = svhn_labels_copy[0:len(map_Y_train_sub)]
+                X_unlabel_sub = torch.tensor(svhn_data.data, dtype=torch.float32)
+                map_Y_unlabel_sub = torch.tensor(svhn_data.labels, dtype=torch.long)
+                svhn_subset = torch.utils.data.TensorDataset(X_unlabel_sub, map_Y_unlabel_sub)
+                svhn_loader = torch.utils.data.DataLoader(svhn_subset, batch_size=train_batch_size, shuffle=True, num_workers=2)
                 for ((batch_idx, (inputs, targets)), (batch_idx_unlabel, (inputs_unlabel, targets_unlabel))) in zip(
                         enumerate(trainloader), enumerate(svhn_loader)):
+                    inputs_unlabel = inputs_unlabel.permute(0,2,3,1)
                     if args.cuda:
                         inputs, targets, inputs_unlabel, targets_unlabel = inputs.to(device), targets.to(
                             device), inputs_unlabel.to(device), targets_unlabel.to(device)
-
                     targets = targets - args.nb_cl * iteration
                     loss_cls = 0
                     outputs = stage3_model(inputs, side_fc=True)
@@ -428,7 +431,7 @@ for n_run in range(args.nb_runs):
                 stage3_lr_scheduler.step()
 
                 print('Epoch: %d, LR: %.4f, loss_cls: %.4f, loss_discrepancy: %.4f' % (
-                    stage3_epoch, stage3_lr_scheduler.get_lr()[0], loss_cls.item() / args.side_classifier, loss_discrepancy.item()))
+                    stage3_epoch, stage3_lr_scheduler.get_last_lr()[0], loss_cls.item() / args.side_classifier, loss_discrepancy.item()))
 
                 # evaluate the val set
                 if (stage3_epoch + 1) % 10 == 0:

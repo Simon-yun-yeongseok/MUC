@@ -171,7 +171,7 @@ for n_run in range(args.nb_runs):
             ref_model = None
             num_old_classes = 0
             for param in tg_model.fc_side.parameters():
-                param.requires_grad = False
+                param.requires_grad = True
         else:
             #increment classes
             ref_model = copy.deepcopy(tg_model) 
@@ -186,6 +186,8 @@ for n_run in range(args.nb_runs):
             new_fc.weight.data[:num_old_classes] = ref_model.fc.weight.data
             new_fc.bias.data[:num_old_classes] = ref_model.fc.bias.data
             tg_model.fc = new_fc
+            for param in tg_model.fc.parameters():
+                param.requires_grad = True
 
             ## new side classifier
             num_old_classes_side = ref_model.fc_side.out_features
