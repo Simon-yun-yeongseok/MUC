@@ -91,8 +91,8 @@ class ResNet(nn.Module):
         self.layer3 = self._make_layer(block, 64, layers[2], stride=2)
         self.avgpool = nn.AvgPool2d(8, stride=1)
         self.fc = nn.Linear(64 * block.expansion, num_classes)
-        # self.fc_side = nn.Linear(64 * block.expansion, num_classes*side_classifier)
-        self.fc_side = nn.Linear(64 * block.expansion, 20)
+        self.fc_side = nn.Linear(64 * block.expansion, num_classes*side_classifier)
+        # self.fc_side = nn.Linear(64 * block.expansion, 20)
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
@@ -177,7 +177,7 @@ class ResNet_custom(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x, side_fc=True):
-        x = x.permute(0,3,1,2)
+        # x = x.permute(0,3,1,2)
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)

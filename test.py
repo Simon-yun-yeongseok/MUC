@@ -26,22 +26,33 @@ import sys
 #         for i in range (iteration):
 #             print(name, "=", globals()[i])
     
+a1 = 1
+a2 = 2
+b1 = 5
+b2 = 6
     
+if a1 >= a2:
+    b1 = b2
+else:
+    b2 = b1+5
     
 
+print(a1, a2, b1, b2)
 
-sum = 0
-for i in range(5):
-    globals()['var{}'.format(i)] = i
-    sum += globals()['var{}'.format(i)]
-    print(sum)
-for i in range(5):
-    print(globals()['var{}'.format(i)])
+# sum = 0
+# for i in range(5):
+#     globals()['var{}'.format(i)] = i
+#     sum += globals()['var{}'.format(i)]
+#     print(sum)
+# for i in range(5):
+#     print(globals()['var{}'.format(i)])
 
 # iteration = 0
 # for j in range(5):
 #     iteration +=1
 #     for i in range(iteration, iteration+1):
-#             globals()['eval_model_{}.format(i)'] = 0
-#             eval_model_i = i+3
-#             print(eval_model_i)
+#         globals()['eval_model_{}.format(i)'] = tg_model
+#         eval_model_i = i+3
+#         print(eval_model_i)
+# for i in range(5):
+#     print(globals()['var{}'.format(i)])
