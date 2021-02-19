@@ -32,7 +32,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 ######### Modifiable Settings ##########
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', default='tinyImageNet', type=str)
-parser.add_argument('--dataset_dir', default='./data/Tiny_ImageNet', type=str)
+parser.add_argument('--dataset_dir', default='./data/Tiny_ImageNet/tiny-imagenet-200', type=str)
 parser.add_argument('--OOD_dir', default='./data/SVHN', type=str)
 parser.add_argument('--num_classes', default=200, type=int)
 parser.add_argument('--nb_cl_fg', default=40, type=int, help='the number of classes in first group')

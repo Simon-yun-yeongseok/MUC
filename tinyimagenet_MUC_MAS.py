@@ -459,23 +459,19 @@ for n_run in range(args.nb_runs):
                     outputs = stage3_model(inputs, side_fc=True)
                     for i in range(args.side_classifier):
                         loss_cls += cls_criterion(
-                            outputs[:, (start_index + args.nb_cl * i):(start_index + args.nb_cl * (i + 1))],
-                            targets)
+                            outputs[:, (start_index + args.nb_cl * i):(start_index + args.nb_cl * (i + 1))], targets)
 
                     ## discrepancy loss
                     outputs_unlabel = stage3_model(inputs_unlabel, side_fc=True)
                     loss_discrepancy = 0
                     for iter_1 in range(args.side_classifier):
-                        outputs_unlabel_1 = outputs_unlabel[:, (start_index + args.nb_cl * iter_1):(
-                                    start_index + args.nb_cl * (iter_1 + 1))]
+                        outputs_unlabel_1 = outputs_unlabel[:, (start_index + args.nb_cl * iter_1):(start_index + args.nb_cl * (iter_1 + 1))]
                         outputs_unlabel_1 = F.softmax(outputs_unlabel_1, dim=1)
                         for iter_2 in range(iter_1 + 1, args.side_classifier):
-                            outputs_unlabel_2 = outputs_unlabel[:, (start_index + args.nb_cl * iter_2):(
-                                        start_index + args.nb_cl * (iter_2 + 1))]
+                            outputs_unlabel_2 = outputs_unlabel[:, (start_index + args.nb_cl * iter_2):(start_index + args.nb_cl * (iter_2 + 1))]
                             outputs_unlabel_2 = F.softmax(outputs_unlabel_2, dim=1)
                             # loss_discrepancy += torch.mean(F.relu(1.0 - torch.sum(torch.abs(outputs_unlabel_1 - outputs_unlabel_2), 1)))
-                            loss_discrepancy += torch.mean(
-                                torch.mean(torch.abs(outputs_unlabel_1 - outputs_unlabel_2), 1))
+                            loss_discrepancy += torch.mean(torch.mean(torch.abs(outputs_unlabel_1 - outputs_unlabel_2), 1))
                     loss = loss_cls - loss_discrepancy
 
                     stage3_optimizer.zero_grad()
