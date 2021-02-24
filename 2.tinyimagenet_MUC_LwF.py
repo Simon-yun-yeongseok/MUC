@@ -78,39 +78,44 @@ lr_strat               = [120, 160, 180]      # Epochs where learning rate gets 
 lr_factor              = 0.1            # Learning rate decrease factor
 custom_weight_decay    = 5e-4           # Weight Decay
 custom_momentum        = 0.9            # Momentum
-epochs                 = 200            # initial = 200
-val_epoch              = 10             # evaluate the model in every val_epoch(initial = 10)
-save_epoch             = 50             # save the model in every save_epoch(initial = 50)
+epochs                 = 4            # initial = 200
+val_epoch              = 2             # evaluate the model in every val_epoch(initial = 10)
+save_epoch             = 2             # save the model in every save_epoch(initial = 50)
 Stage1_flag = True                      # Train new model and new classifier
 stage2_flag = True                      # Train side classifiers with Maximum Classifier Discrepancy  Initial : True
 
 stage2_lr_strat        = [40, 60, 70]
-stage2_epochs          = 80             # initial = 80
-stage2_val_epoch       = 10             # evaluate the model in every stage2_val_epoch(initial = 10)
-stage2_save_epoch      = 40             # save the model in every stage2_save_epoch(initial = 40)
+stage2_epochs          = 4             # initial = 80
+stage2_val_epoch       = 2             # evaluate the model in every stage2_val_epoch(initial = 10)
+stage2_save_epoch      = 2             # save the model in every stage2_save_epoch(initial = 40)
 np.random.seed(args.random_seed)        # Fix the random seed
 print(args)
 ########################################
 
-transform_train = transforms.Compose([
-    # transforms.RandomCrop(32, padding=4),
-    transforms.RandomHorizontalFlip(),
-    #transforms.RandomRotation(10),
-    transforms.ToTensor(),
-    transforms.Normalize((0.5071, 0.4866, 0.4409), (0.2009, 0.1984, 0.2023)),
-])
-transform_test = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize((0.5071, 0.4866, 0.4409), (0.2009, 0.1984, 0.2023)),
-])
+traindir = args.dataset_dir + '/train'
+valdir = args.dataset_dir + '/test_0225'  ##0224
+normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])
+trainset = datasets.ImageFolder(
+    traindir,
+    transforms.Compose([
+        transforms.Resize((32, 32)),
+        transforms.RandomCrop(32, padding=4),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        normalize,
+    ]))
+testset =  datasets.ImageFolder(valdir, transforms.Compose([
+        transforms.Resize((32, 32)),
+        transforms.ToTensor(),
+        normalize,
+    ]))
+evalset =  datasets.ImageFolder(valdir, transforms.Compose([
+        transforms.Resize((32, 32)),
+        transforms.ToTensor(),
+        normalize,
+    ]))
 
-
-trainset = torchvision.datasets.CIFAR100(root=args.dataset_dir, train=True,
-                                        download=True, transform=transform_train)
-testset = torchvision.datasets.CIFAR100(root=args.dataset_dir, train=False,
-                                       download=True, transform=transform_test)
-evalset = torchvision.datasets.CIFAR100(root=args.dataset_dir, train=False,
-                                       download=False, transform=transform_test)
 
 # save accuracy
 top1_acc_list = np.zeros((args.nb_runs, int(args.num_classes/args.nb_cl), int(epochs/val_epoch)))
@@ -160,7 +165,7 @@ for n_run in range(args.nb_runs):
 
     start_iter = 0
     for iteration in range(start_iter, int(args.num_classes/args.nb_cl)):
-        # Prepare the training data for the current batch of classes(total class(100)/group class(20))
+        # Prepare the training data for the current batch of classes(total class(200)/group class(40))
         actual_cl        = order[range(iteration*args.nb_cl,(iteration+1)*args.nb_cl)]
         indices_train_subset = np.array([i in order[range(iteration*args.nb_cl,(iteration+1)*args.nb_cl)] for i in Y_train_total]) 
         indices_test_subset  = np.array([i in order[range(0,(iteration+1)*args.nb_cl)] for i in Y_valid_total])
@@ -171,9 +176,6 @@ for n_run in range(args.nb_runs):
         ## labels
         Y_train          = Y_train_total[indices_train_subset]  
         Y_valid          = Y_valid_total[indices_test_subset]
-        print('Min and Max of train labels: {}, {}'.format(min(Y_train), max(Y_train)))
-        print('Min and Max of valid labels: {}, {}'.format(min(Y_valid), max(Y_valid)))
-        exit()
         
         # Launch the training loop
         print('Batch of classes number {0} arrives ...'.format(iteration+1))
@@ -303,24 +305,23 @@ for n_run in range(args.nb_runs):
                     for i in range(iteration):
                         print("stage1 iteration :{}".format(i))
                         indices_valid_subset_old = np.array([j in order[range(i * args.nb_cl, (i+1) * args.nb_cl)] for j in Y_valid_total])
-                        
-                        evalset.data = X_valid_total.astype('uint8')[indices_valid_subset_old]
+                        X_valid_old = X_valid_total[indices_valid_subset_old]   ##0224(5)
                         Y_valid_old = Y_valid_total[indices_valid_subset_old]
-                        
-                        evalset.targets = np.array([order_list.index(i) for i in Y_valid_old]) 
+                        map_Y_valid_old = np.array([order_list.index(i) for i in Y_valid_old])
+                        ori_eval_set = merge_images_labels(X_valid_old, map_Y_valid_old)
+                        evalset.imgs = evalset.samples = ori_eval_set
                         evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size, shuffle=False, num_workers=2)
                         acc_old = compute_accuracy_WI(tg_model, evalloader, 0, args.nb_cl*(iteration+1))
                         print('Old class(group{}) accuracy: {:.2f} %'.format((i+1),(acc_old)))
                         old_val_list_sub[i] = np.array(acc_old)
 
                     # Calculate validation accuracy of model on the current classes:
-                    # print('Computing accuracy on the original batch of classes...')
                     indices_test_subset_cur = np.array([i in order[range(iteration * args.nb_cl, (iteration+1) * args.nb_cl)] for i in Y_valid_total])
-                    X_valid_cur = X_valid_total[indices_test_subset_cur]
+                    X_valid_cur = X_valid_total[indices_test_subset_cur]   ##0224(5)
                     Y_valid_cur = Y_valid_total[indices_test_subset_cur]
-                    map_Y_valid_cur = np.array([order_list.index(i) for i in Y_valid_cur]) 
-                    evalset.data = X_valid_cur.astype('uint8')
-                    evalset.targets = map_Y_valid_cur
+                    map_Y_valid_cur = np.array([order_list.index(i) for i in Y_valid_cur])
+                    cur_eval_set = merge_images_labels(X_valid_cur, map_Y_valid_cur)
+                    evalset.imgs = evalset.samples = cur_eval_set
                     evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size, shuffle=False, num_workers=2)
                     acc_cur_sub = compute_accuracy_WI(tg_model, evalloader, 0, args.nb_cl*(iteration+1))
                     
@@ -328,7 +329,7 @@ for n_run in range(args.nb_runs):
                         acc_cur = copy.deepcopy(acc_cur_sub)
                         old_val_list = copy.deepcopy(old_val_list_sub)
                     else:
-                        if acc_cur < acc_cur_sub:                         ##0216
+                        if acc_cur < acc_cur_sub:
                             acc_cur = copy.deepcopy(acc_cur_sub)
                             old_val_list = copy.deepcopy(old_val_list_sub)
                         elif acc_cur == acc_cur_sub:
@@ -357,7 +358,7 @@ for n_run in range(args.nb_runs):
 
             stage2_model = copy.deepcopy(tg_model)
             start_index = args.nb_cl * args.side_classifier * iteration
-            # unlabel_start_index = args.unlabel_nb_cl * args.side_classifier * iteration ##0216
+            # unlabel_start_index = args.unlabel_nb_cl * args.side_classifier * iteration
             
             print("Initialize Side Classifiers with Main Classifier")
             for i in range(args.side_classifier):
@@ -402,14 +403,14 @@ for n_run in range(args.nb_runs):
                     loss_discrepancy = 0
                     outputs_unlabel = stage2_model(inputs_unlabel, side_fc=True)
                     for iter_1 in range(args.side_classifier):
-                        outputs_unlabel_1 = outputs_unlabel[:, (start_index + args.nb_cl * iter_1):(start_index + args.nb_cl * (iter_1 + 1))]  ##0216
+                        outputs_unlabel_1 = outputs_unlabel[:, (start_index + args.nb_cl * iter_1):(start_index + args.nb_cl * (iter_1 + 1))]
                         outputs_unlabel_1 = F.softmax(outputs_unlabel_1, dim=1)
                         for iter_2 in range(iter_1 + 1, args.side_classifier):
-                            outputs_unlabel_2 = outputs_unlabel[:, (start_index + args.nb_cl * iter_2):(start_index + args.nb_cl * (iter_2 + 1))]  ##0216
+                            outputs_unlabel_2 = outputs_unlabel[:, (start_index + args.nb_cl * iter_2):(start_index + args.nb_cl * (iter_2 + 1))]
                             outputs_unlabel_2 = F.softmax(outputs_unlabel_2, dim=1)
                             # loss_discrepancy += torch.mean(F.relu(1.0 - torch.sum(torch.abs(outputs_unlabel_1 - outputs_unlabel_2), 1)))
                             loss_discrepancy += torch.mean(torch.mean(torch.abs(outputs_unlabel_1 - outputs_unlabel_2), 1))
-                            # loss_discrepancy += torch.sum(torch.abs(outputs_unlabel_1 - outputs_unlabel_2), 1)  ##0216
+                            # loss_discrepancy += torch.sum(torch.abs(outputs_unlabel_1 - outputs_unlabel_2), 1)
                     loss = loss_cls - loss_discrepancy
 
                     stage2_optimizer.zero_grad()
@@ -427,9 +428,11 @@ for n_run in range(args.nb_runs):
                     for i in range(iteration):
                         print("stage2 iteration :{}".format(i))
                         indices_valid_subset_current = np.array([j in order[range(i * args.nb_cl, (i+1) * args.nb_cl)] for j in Y_valid_total])
-                        evalset.data = X_valid_total.astype('uint8')[indices_valid_subset_current]
+                        X_stage2_valid_old = X_valid_total[indices_valid_subset_current]   ##0224(5)
                         Y_stage2_valid_old = Y_valid_total[indices_valid_subset_current]
-                        evalset.targets = np.array([order_list.index(i) for i in Y_stage2_valid_old])
+                        map_Y_stage2_valid_old = np.array([order_list.index(i) for i in Y_stage2_valid_old])
+                        stage2_eval_set_old = merge_images_labels(X_stage2_valid_old, map_Y_stage2_valid_old)
+                        evalset.imgs = evalset.samples = stage2_eval_set_old
                         stage2_old_evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size, shuffle=False, num_workers=2)
                         stage2_acc_old = compute_accuracy_Version1(stage2_model, stage2_old_evalloader, args.nb_cl, args.side_classifier, i) 
                         print('Old class(group{}) accuracy: {:.2f} %'.format((i+1),(stage2_acc_old)))
@@ -437,20 +440,19 @@ for n_run in range(args.nb_runs):
                         stage2_old_val_list_sub[i] = np.array(stage2_acc_old)
 
                     indices_stage2_test_subset_cur = np.array([i in order[range(iteration * args.nb_cl, (iteration+1) * args.nb_cl)] for i in Y_valid_total])
-                    X_stage2_valid_cur = X_valid_total[indices_stage2_test_subset_cur]
+                    X_stage2_valid_cur = X_valid_total[indices_stage2_test_subset_cur]   ##0224(5)
                     Y_stage2_valid_cur = Y_valid_total[indices_stage2_test_subset_cur]
                     map_Y_stage2_valid_cur = np.array([order_list.index(i) for i in Y_stage2_valid_cur])
-                    evalset.data = X_stage2_valid_cur.astype('uint8')
-                    evalset.targets = map_Y_stage2_valid_cur
+                    stage2_eval_set_cur = merge_images_labels(X_stage2_valid_cur, map_Y_stage2_valid_cur)
+                    evalset.imgs = evalset.samples = stage2_eval_set_cur
                     stage2_cur_evalloader = torch.utils.data.DataLoader(evalset, batch_size=test_batch_size, shuffle=False, num_workers=2)
-                    stage2_acc_cur_sub = compute_accuracy_Version1(stage2_model, stage2_cur_evalloader, args.nb_cl, args.side_classifier, iteration)   ##0218
-                    # stage2_acc_cur_sub = compute_accuracy_WI(stage2_model, stage2_cur_evalloader, 0, args.nb_cl)
+                    stage2_acc_cur_sub = compute_accuracy_Version1(stage2_model, stage2_cur_evalloader, args.nb_cl, args.side_classifier, iteration)
                     
                     if stage2_epoch+1 == val_epoch:
                         stage2_acc_cur = copy.deepcopy(stage2_acc_cur_sub)
                         stage2_old_val_list = copy.deepcopy(stage2_old_val_list_sub)  
                     else:
-                        if stage2_acc_cur < stage2_acc_cur_sub:                         ##0216                     
+                        if stage2_acc_cur < stage2_acc_cur_sub:                    
                             stage2_acc_cur = copy.deepcopy(stage2_acc_cur_sub)
                             stage2_old_val_list = copy.deepcopy(stage2_old_val_list_sub)
                         elif stage2_acc_cur == stage2_acc_cur_sub:
