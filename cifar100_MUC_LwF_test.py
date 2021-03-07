@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # coding=utf-8
+import pdb
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -23,8 +24,6 @@ import resnet_model
 import utils_pytorch
 from compute_accuracy import compute_accuracy_WI
 from compute_accuracy import compute_accuracy_Version1
-# from tutorial import CustomDataset
-
 
 global device
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -47,8 +46,8 @@ parser.add_argument('--beta', default=0.25, type=float, help='Beta for distiallt
 parser.add_argument('--resume', default='True', action='store_true', help='resume from checkpoint')
 parser.add_argument('--random_seed', default=1988, type=int, help='random seed')
 parser.add_argument('--cuda', default=True, help='enables cuda')
-parser.add_argument('--side_classifier', default=1, type=int, help='multiple classifiers')
-parser.add_argument('--Stage3_flag', default='False', action='store_true', help='multiple classifiers')
+parser.add_argument('--side_classifier', default=1, type=int, help='multiple classifiers')  # gmpark
+parser.add_argument('--Stage3_flag', default='True', action='store_true', help='multiple classifiers')
 parser.add_argument('--memory_budget', default=2000, type=int, help='Exemplars of old classes')
 args = parser.parse_args()
 
@@ -68,15 +67,15 @@ eval_batch_size        = 100            # Batch size for eval
 base_lr                = 0.1            # Initial learning rate
 lr_strat               = [120, 160, 180]      # Epochs where learning rate gets decreased
 lr_factor              = 0.1            # Learning rate decrease factor
-custom_weight_decay    = 5e-4           # Weight Decay
+custom_weight_decay    = 5e-4            # Weight Decay
 custom_momentum        = 0.9            # Momentum
-epochs                 = 2            # initial = 200
-val_epoch              = 2             # evaluate the model in every val_epoch(initial = 10)
-save_epoch             = 2             # save the model in every save_epoch(initial = 50)
+epochs                 = 200
+val_epoch              = 10             # evaluate the model in every val_epoch
+save_epoch             = 50             # save the model in every save_epoch
 np.random.seed(args.random_seed)        # Fix the random seed
 print(args)
 Stage1_flag = True  # Train new model and new classifier
-Stage3_flag = False  # Train side classifiers with Maximum Classifier Discrepancy
+Stage3_flag = False  # Train side classifiers with Maximum Classifier Discrepancy  # gmpark
 ########################################
 transform_train = transforms.Compose([
     transforms.RandomCrop(32, padding=4),
@@ -90,33 +89,26 @@ transform_test = transforms.Compose([
     transforms.Normalize((0.5071, 0.4866, 0.4409), (0.2009, 0.1984, 0.2023)),
 ])
 
-
 trainset = torchvision.datasets.CIFAR100(root=args.dataset_dir, train=True,
-                                        download=True, transform=transform_train)
+                                        download=False, transform=transform_train)
 testset = torchvision.datasets.CIFAR100(root=args.dataset_dir, train=False,
-                                       download=True, transform=transform_test)
+                                       download=False, transform=transform_test)
 evalset = torchvision.datasets.CIFAR100(root=args.dataset_dir, train=False,
                                        download=False, transform=transform_test)
 
-
-
 # save accuracy
 top1_acc_list = np.zeros((args.nb_runs, int(args.num_classes/args.nb_cl), int(epochs/val_epoch)))
-
-
+# gmpark
 X_train_total = np.array(trainset.data)
 Y_train_total = np.array(trainset.targets)
-X_valid_total = np.array(testset.data)     # test set is used as val set
+X_valid_total = np.array(testset.data) # test set is used as val set
 Y_valid_total = np.array(testset.targets)
 
-## Load unlabeled data from SVHN
-svhn_data = torchvision.datasets.SVHN(root=args.OOD_dir, download=True, transform=transform_train)
-svhn_num = svhn_data.data.shape[0]
-svhn_data_copy = svhn_data.data
-svhn_labels_copy = svhn_data.labels
-
-
-
+## Load unlabeled data from SVHN  # gmpark
+# svhn_data = torchvision.datasets.SVHN(root=args.OOD_dir, download=False, transform=transform_train)
+# svhn_num = svhn_data.data.shape[0]
+# svhn_data_copy = svhn_data.data
+# svhn_labels_copy = svhn_data.labels
 
 # Launch the different runs
 for n_run in range(args.nb_runs):
@@ -134,54 +126,47 @@ for n_run in range(args.nb_runs):
     order_list = list(order)
     print(order_list)
 
-
     start_iter = 0
     for iteration in range(start_iter, int(args.num_classes/args.nb_cl)):
-        # Prepare the training data for the current batch of classes(total class(100)/group class(20))
+        # Prepare the training data for the current batch of classes
         actual_cl        = order[range(iteration*args.nb_cl,(iteration+1)*args.nb_cl)]
-        indices_train_subset = np.array([i in order[range(iteration*args.nb_cl,(iteration+1)*args.nb_cl)] for i in Y_train_total]) ### true & false for i in Y_train_total  ##
+        indices_train_subset = np.array([i in order[range(iteration*args.nb_cl,(iteration+1)*args.nb_cl)] for i in Y_train_total])
         indices_test_subset  = np.array([i in order[range(0,(iteration+1)*args.nb_cl)] for i in Y_valid_total])
-        
+
         ## images
         X_train          = X_train_total[indices_train_subset]
         X_valid          = X_valid_total[indices_test_subset]
         ## labels
-        Y_train          = Y_train_total[indices_train_subset]  
+        Y_train          = Y_train_total[indices_train_subset]
         Y_valid          = Y_valid_total[indices_test_subset]
-        
+
         # Launch the training loop
         print('Batch of classes number {0} arrives ...'.format(iteration+1))
         map_Y_train = np.array([order_list.index(i) for i in Y_train])
         map_Y_valid = np.array([order_list.index(i) for i in Y_valid])
-
-        X_train_sub = torch.tensor(X_train, dtype=torch.float32)
-        map_Y_train_sub = torch.tensor(map_Y_train, dtype=torch.long)
-        X_valid_sub = torch.tensor(X_valid, dtype=torch.float32)
-        map_Y_valid_sub = torch.tensor(map_Y_valid, dtype=torch.long)
-
-        
-        train_subset = torch.utils.data.TensorDataset(X_train_sub, map_Y_train_sub)
-        test_subset = torch.utils.data.TensorDataset(X_valid_sub, map_Y_valid_sub)
-        
-        trainloader = torch.utils.data.DataLoader(train_subset, batch_size=train_batch_size, shuffle=True, num_workers=2)
-        testloader = torch.utils.data.DataLoader(test_subset, batch_size=test_batch_size, shuffle=False, num_workers=2)
-
-        print('Min and Max of train labels: {}, {}'.format(min(map_Y_train), max(map_Y_train)))
-        print('Min and Max of valid labels: {}, {}'.format(min(map_Y_valid), max(map_Y_valid)))
-        
+        ############################################################
+        # gmpark
+        trainset.data = X_train.astype('uint8')
+        trainset.targets = map_Y_train
+        trainloader = torch.utils.data.DataLoader(trainset, batch_size=train_batch_size, shuffle=True, num_workers=2)
+        testset.data = X_valid.astype('uint8')
+        testset.targets = map_Y_valid
+        testloader = torch.utils.data.DataLoader(testset, batch_size=test_batch_size, shuffle=False, num_workers=2)
+        print('Max and Min of train labels: {}, {}'.format(min(map_Y_train), max(map_Y_train)))
+        print('Max and Min of valid labels: {}, {}'.format(min(map_Y_valid), max(map_Y_valid)))
+        ##############################################################
         # Add the stored exemplars to the training data
         if iteration == start_iter:
             X_valid_ori = X_valid
             Y_valid_ori = Y_valid
-                        
         else:
             indices_test_subset_ori = np.array([i in order[range(0, iteration*args.nb_cl)] for i in Y_valid_total])
             X_valid_ori = X_valid_total[indices_test_subset_ori]
             Y_valid_ori = Y_valid_total[indices_test_subset_ori]
-            
+
         if iteration == start_iter:
             # base classes
-            tg_model = resnet_model.resnet32_custom(num_classes=args.nb_cl, side_classifier=args.side_classifier)
+            tg_model = resnet_model.resnet32(num_classes=args.nb_cl, side_classifier=args.side_classifier)  # gmpark
             tg_model = tg_model.to(device)
             ref_model = None
             num_old_classes = 0
@@ -224,20 +209,16 @@ for n_run in range(args.nb_runs):
             cls_criterion.to(device)
             for epoch in range(epochs):
                 temp = 1
-                tg_optimizer.step()
-                tg_lr_scheduler.step()                
                 for batch_idx, (inputs, targets) in enumerate(trainloader):
-                    # print("번호: {}, input: {}, output: {}".format(batch_idx, len(inputs), len(targets)))
                     if args.cuda:
                         inputs = inputs.to(device)
                         targets = targets.to(device)
-                        # print(targets)
 
                     if iteration == start_iter:
                         outputs = tg_model(inputs, side_fc=False)
+                        # pdb.set_trace()
                         loss_cls = cls_criterion(outputs[:, num_old_classes:(num_old_classes+args.nb_cl)], targets)
                         loss = loss_cls
-
                     else:
                         targets = targets - args.nb_cl * iteration
                         outputs = tg_model(inputs)
@@ -270,7 +251,7 @@ for n_run in range(args.nb_runs):
 
                     tg_optimizer.zero_grad()
                     loss.backward()
-                    
+                    tg_optimizer.step()
 
                 if iteration==start_iter:
                     print('Epoch: %d, LR: %.4f, loss_cls: %.4f' % (epoch, tg_lr_scheduler.get_lr()[0], loss_cls.item()))
@@ -282,16 +263,18 @@ for n_run in range(args.nb_runs):
                 # evaluate the val set
                 if (epoch + 1) % val_epoch == 0:
                     tg_model.eval()
+                    # if iteration>start_iter:
+                    #     ## joint classifiers
+                    #     #num_old_classes = ref_model.fc.out_features
+                    #     tg_model.fc.weight.data[:num_old_classes] = ref_model.fc.weight.data
+                    #     tg_model.fc.bias.data[:num_old_classes] = ref_model.fc.bias.data
                     print("##############################################################")
                     # Calculate validation error of model on the original classes:
                     map_Y_valid_ori = np.array([order_list.index(i) for i in Y_valid_ori])
-                    print('Computing accuracy on the original batch of classes...')
-                    
-                    X_eval_sub = torch.tensor(X_valid_ori, dtype=torch.float32)
-                    map_Y_eval_sub = torch.tensor(map_Y_valid_ori, dtype=torch.long)
-                    eval_subset = torch.utils.data.TensorDataset(X_eval_sub, map_Y_eval_sub)
-                    evalloader = torch.utils.data.DataLoader(eval_subset, batch_size=train_batch_size, shuffle=True, num_workers=2)
-                    
+                    # print('Computing accuracy on the original batch of classes...')
+                    evalset.test_data = X_valid_ori.astype('uint8')
+                    evalset.test_labels = map_Y_valid_ori
+                    evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size, shuffle=False, num_workers=2)
                     acc_old = compute_accuracy_WI(tg_model, evalloader, 0, args.nb_cl*(iteration+1))
                     print('Old classes accuracy: {:.2f} %'.format(acc_old))
                     ##
@@ -300,12 +283,9 @@ for n_run in range(args.nb_runs):
                     Y_valid_cur = Y_valid_total[indices_test_subset_cur]
                     map_Y_valid_cur = np.array([order_list.index(i) for i in Y_valid_cur])
                     # print('Computing accuracy on the original batch of classes...')
-                    
-                    X_eval_sub = torch.tensor(X_valid_cur, dtype=torch.float32)
-                    map_Y_eval_sub = torch.tensor(map_Y_valid_cur, dtype=torch.long)
-                    eval_subset = torch.utils.data.TensorDataset(X_eval_sub, map_Y_eval_sub)
-                    evalloader = torch.utils.data.DataLoader(eval_subset, batch_size=train_batch_size, shuffle=True, num_workers=2)
-
+                    evalset.test_data = X_valid_cur.astype('uint8')
+                    evalset.test_labels = map_Y_valid_cur
+                    evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size, shuffle=False, num_workers=2)
                     acc_cur = compute_accuracy_WI(tg_model, evalloader, 0, args.nb_cl*(iteration+1))
                     print('New classes accuracy: {:.2f} %'.format(acc_cur))
                     # Calculate validation error of model on the cumul of classes:
@@ -315,10 +295,11 @@ for n_run in range(args.nb_runs):
                     tg_model.train()
                     ## record accuracy
                     top1_acc_list[n_run, iteration, int((epoch + 1)/val_epoch)-1] = np.array(acc)
+                tg_lr_scheduler.step()  # gmpark
 ########## end of Stage 1
 
 
-########## Stage 3: Maximum Classifier Discrepancy for each iteration #################
+######### Stage 3: Maximum Classifier Discrepancy for each iteration #################
         if Stage3_flag is True:
             print("Stage 3: Train Side Classifiers with Maximum Classifier Discrepancy for iteration {}".format(iteration))
             ##
@@ -337,65 +318,34 @@ for n_run in range(args.nb_runs):
                     p.requires_grad = True
                 else:
                     p.requires_grad = False
-            stage3_lr_start = [40, 60, 70]
-            stage3_epochs = 15              ## initial = 80
+            stage3_lr_strat = [40, 60, 70]
+            stage3_epochs = 80
             stage3_params = list(stage3_model.fc_side.parameters())
             stage3_optimizer = optim.SGD(stage3_params, lr=base_lr, momentum=custom_momentum,weight_decay=custom_weight_decay)
-            stage3_lr_scheduler = lr_scheduler.MultiStepLR(stage3_optimizer, milestones=stage3_lr_start, gamma=lr_factor)
+            stage3_lr_scheduler = lr_scheduler.MultiStepLR(stage3_optimizer, milestones=stage3_lr_strat, gamma=lr_factor)
             cls_criterion = nn.CrossEntropyLoss()
             cls_criterion.to(device)
             ## Train
             for stage3_epoch in range(stage3_epochs):
-                
                 stage3_lr_scheduler.step()
                 # select a subset of SVHN data
-                # svhn_data_sub = svhn_data_copy
-                # svhn_labels_sub = svhn_labels_copy
-
                 idx = torch.randperm(svhn_num)
-                svhn_data_sub = svhn_data_copy[idx]
-                svhn_labels_sub = svhn_labels_copy[idx]
-                               
-                # map_svhn_labels1 = np.array([idx.index(i) for i in Y_train])
-
-                map_svhn_data = svhn_data_sub[0:len(Y_train)]
-                map_svhn_labels = svhn_labels_sub[0:len(Y_train)]
-                
-                X_svhn_sub = torch.tensor(map_svhn_data, dtype=torch.float32)
-                X_svhn_sub = X_svhn_sub.permute(0,3,2,1)
-                map_Y_svhn_sub = torch.tensor(map_svhn_labels, dtype=torch.long)  ####    1~10 -> 0~9
-                # print('Min and Max of svhn labels: {}, {}'.format(min(svhn_labels_sub), max(svhn_labels_sub)))
-                # print('Min and Max of svhn labels: {}, {}'.format(min(map_Y_svhn_sub), max(map_Y_svhn_sub)))
-                
-                svhn_subset = torch.utils.data.TensorDataset(X_svhn_sub, map_Y_svhn_sub)
-                svhn_loader = torch.utils.data.DataLoader(svhn_subset, batch_size=train_batch_size, shuffle=True, num_workers=2)
-                
-                for (batch_idx, (inputs, targets)) in enumerate(trainloader):
+                svhn_data_copy = svhn_data_copy[idx]
+                svhn_labels_copy = svhn_labels_copy[idx]
+                svhn_data.data = svhn_data_copy[0:len(trainset.train_labels)]
+                svhn_data.labels = svhn_labels_copy[0:len(trainset.train_labels)]
+                svhn_loader = torch.utils.data.DataLoader(dataset=svhn_data, batch_size=train_batch_size, shuffle=True, num_workers=2)
+                for ((batch_idx, (inputs, targets)), (batch_idx_unlabel, (inputs_unlabel, targets_unlabel))) in zip(
+                        enumerate(trainloader), enumerate(svhn_loader)):
                     if args.cuda:
-                        inputs, targets = inputs.to(device), targets.to(device)
-                    
+                        inputs, targets, inputs_unlabel, targets_unlabel = inputs.to(device), targets.to(
+                            device), inputs_unlabel.to(device), targets_unlabel.to(device)
+
                     targets = targets - args.nb_cl * iteration
                     loss_cls = 0
                     outputs = stage3_model(inputs, side_fc=True)
-                    # outputs_fake = outputs[:,0:start_index + args.nb_cl]
-
-                    # for i in range(args.side_classifier):
-                    #     # loss_cls += cls_criterion(outputs[:, (start_index + args.nb_cl * i):(start_index + args.nb_cl * (i + 1))], targets)
-                    #     print(i, start_index + args.nb_cl * i)
-                    #     outputs_fake = outputs[:, (start_index + args.nb_cl * i):(start_index + args.nb_cl * (i + 1))]
-                    #     print(outputs_fake)
-                    #     loss_cls += cls_criterion(outputs_fake, targets)
-                        
-
-                    #     # print('Min and Max of svhn labels: {}, {}'.format(min(targets), max(targets)))
-                    #     # print(outputs[:, (start_index + args.nb_cl * i):(start_index + args.nb_cl * (i + 1))])
-                    # exit()
-
-                for (batch_idx_unlabel, (inputs_unlabel, targets_unlabel)) in enumerate(svhn_loader):
-                    if args.cuda:
-                        inputs_unlabel, targets_unlabel = inputs_unlabel.to(device), targets_unlabel.to(device)
-                        print(targets_unlabel)
-                        print('Min and Max of OOD labels: {}, {}'.format(min(targets_unlabel), max(targets_unlabel)))
+                    for i in range(args.side_classifier):
+                        loss_cls += cls_criterion(outputs[:, (start_index + args.nb_cl * i):(start_index + args.nb_cl * (i + 1))], targets)
 
                     ## discrepancy loss
                     outputs_unlabel = stage3_model(inputs_unlabel, side_fc=True)
@@ -403,13 +353,10 @@ for n_run in range(args.nb_runs):
                     for iter_1 in range(args.side_classifier):
                         outputs_unlabel_1 = outputs_unlabel[:, (start_index + args.nb_cl * iter_1):(start_index + args.nb_cl * (iter_1 + 1))]
                         outputs_unlabel_1 = F.softmax(outputs_unlabel_1, dim=1)
-                        for iter_2 in range((iter_1 + 1), args.side_classifier):
+                        for iter_2 in range(iter_1 + 1, args.side_classifier):
                             outputs_unlabel_2 = outputs_unlabel[:, (start_index + args.nb_cl * iter_2):(start_index + args.nb_cl * (iter_2 + 1))]
                             outputs_unlabel_2 = F.softmax(outputs_unlabel_2, dim=1)
                             #loss_discrepancy += torch.mean(F.relu(1.0 - torch.sum(torch.abs(outputs_unlabel_1 - outputs_unlabel_2), 1)))
-                            print(outputs_unlabel_1.shape, outputs_unlabel_2.shape)
-                            print(len(outputs_unlabel_1), len(outputs_unlabel_2))
-
                             loss_discrepancy += torch.mean(torch.mean(torch.abs(outputs_unlabel_1 - outputs_unlabel_2), 1))
                     loss = loss_cls - loss_discrepancy
 
@@ -422,7 +369,6 @@ for n_run in range(args.nb_runs):
 
                 # evaluate the val set
                 if (stage3_epoch + 1) % 10 == 0:
-                    stage3_model = copy.deepcopy(tg_model)
                     stage3_model.fc_side.eval()
                     print("##############################################################")
                     indices_test_subset_current = np.array([i in order[range(iteration * args.nb_cl, (iteration + 1) * args.nb_cl)] for i in Y_valid_total])
@@ -430,22 +376,14 @@ for n_run in range(args.nb_runs):
                     Y_valid_current = Y_valid_total[indices_test_subset_current]
                     map_Y_valid_current = np.array([order_list.index(i) for i in Y_valid_current])
                     # print('Computing accuracy on the original batch of classes...')
-                    
-                    X_eval_sub = torch.tensor(X_valid_current, dtype=torch.float32)
-                    map_Y_eval_sub = torch.tensor(map_Y_valid_current, dtype=torch.long)
-                    eval_subset = torch.utils.data.TensorDataset(X_eval_sub, map_Y_eval_sub)
-                    evalloader = torch.utils.data.DataLoader(eval_subset, batch_size=train_batch_size, shuffle=True, num_workers=2)
-
-                    # evalset.test_data = X_valid_current.astype('uint8')
-                    # evalset.test_labels = map_Y_valid_current
-                    # evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size, shuffle=False, num_workers=2)
-
+                    evalset.data = X_valid_current.astype('uint8')
+                    evalset.labels = map_Y_valid_current
+                    evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size, shuffle=False, num_workers=2)
                     acc = compute_accuracy_Version1(stage3_model, evalloader, args.nb_cl, args.side_classifier, iteration)
                     print('Maximum Classifier Discrepancy accuracy: {:.2f} %'.format(acc))
                     print("##############################################################")
                     stage3_model.fc_side.train()
 
-                ####################### initial 40
                 if (stage3_epoch + 1) % 40 == 0:
                     ckp_name = os.path.join(ckp_prefix + 'MCD_ResNet32_Model_run_{}_step_{}.pth').format(n_run, iteration)
                     torch.save(stage3_model.state_dict(), ckp_name)
@@ -456,12 +394,11 @@ for n_run in range(args.nb_runs):
             #     tg_model.fc_side.bias.data[:start_index] = ref_model.fc_side.bias.data
             tg_model.fc_side.weight.data[start_index:] = stage3_model.fc_side.weight.data[start_index:]
             tg_model.fc_side.bias.data[start_index:] = stage3_model.fc_side.bias.data[start_index:]
-########## end of Stage 3
+######### end of Stage 3
 
 ##################################################################
         # Final save of the results
         print("Save accuracy results for iteration {}".format(iteration))
         ckp_name = os.path.join(ckp_prefix + 'LwF_top1_acc_list_K={}.mat').format(args.side_classifier)
         sio.savemat(ckp_name, {'accuracy': top1_acc_list})
-        print("done!!")
 ##################################################################

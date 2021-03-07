@@ -32,7 +32,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 ######### Modifiable Settings ##########
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', default='tinyImageNet', type=str)
-parser.add_argument('--dataset_dir', default='./data/Tiny_ImageNet', type=str)
+parser.add_argument('--dataset_dir', default='./data/Tiny_ImageNet/tiny-imagenet-200', type=str)
 parser.add_argument('--OOD_dir', default='./data/SVHN', type=str)
 parser.add_argument('--num_classes', default=200, type=int)
 parser.add_argument('--nb_cl_fg', default=40, type=int, help='the number of classes in first group')
@@ -78,7 +78,7 @@ Stage3_flag = True  # Train side classifiers with Maximum Classifier Discrepancy
 
 # Data loading code
 traindir = args.dataset_dir + '/train'
-valdir = args.dataset_dir + '/val_folders'
+valdir = args.dataset_dir + '/val'
 normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                  std=[0.229, 0.224, 0.225])
 trainset = datasets.ImageFolder(
@@ -162,8 +162,8 @@ for n_run in range(args.nb_runs):
         current_test_images = merge_images_labels(X_valid, map_Y_valid)
         testset.imgs = testset.samples = current_test_images
         testloader = torch.utils.data.DataLoader(testset, batch_size=test_batch_size, shuffle=False, num_workers=2)
-        print('Max and Min of train labels: {}, {}'.format(min(map_Y_train), max(map_Y_train)))
-        print('Max and Min of valid labels: {}, {}'.format(min(map_Y_valid), max(map_Y_valid)))
+        print('Min and Max of train labels: {}, {}'.format(min(map_Y_train), max(map_Y_train)))
+        print('Min and Max of valid labels: {}, {}'.format(min(map_Y_valid), max(map_Y_valid)))
         ##############################################################
         # Add the stored exemplars to the training data
         if iteration == start_iter:
@@ -176,7 +176,7 @@ for n_run in range(args.nb_runs):
 
         if iteration == start_iter:
             # base classes
-            tg_model = resnet_cifar.resnet32(num_classes=args.nb_cl, side_classifier=args.side_classifier)
+            tg_model = resnet_model.resnet32(num_classes=args.nb_cl, side_classifier=args.side_classifier)
             tg_model = tg_model.to(device)
             ref_model = None
             num_old_classes = 0

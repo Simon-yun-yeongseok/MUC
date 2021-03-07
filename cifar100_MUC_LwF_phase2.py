@@ -304,10 +304,8 @@ for n_run in range(args.nb_runs):
                     for i in range(iteration):
                         print("stage1 iteration :{}".format(i))
                         indices_valid_subset_old = np.array([j in order[range(i * args.nb_cl, (i+1) * args.nb_cl)] for j in Y_valid_total])
-                        
                         evalset.data = X_valid_total.astype('uint8')[indices_valid_subset_old]
                         Y_valid_old = Y_valid_total[indices_valid_subset_old]
-                        
                         evalset.targets = np.array([order_list.index(i) for i in Y_valid_old]) 
                         evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size, shuffle=False, num_workers=2)
                         acc_old = compute_accuracy_WI(tg_model, evalloader, 0, args.nb_cl*(iteration+1))

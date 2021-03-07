@@ -43,8 +43,8 @@ parser.add_argument('--dataset', default='tinyImageNet', type=str)
 parser.add_argument('--dataset_dir', default='./data/Tiny_ImageNet/tiny-imagenet-200', type=str)
 parser.add_argument('--OOD_dir', default='./data/SVHN', type=str)
 parser.add_argument('--num_classes', default=200, type=int)
-parser.add_argument('--nb_cl_fg', default=40, type=int, help='the number of classes in first group')
-parser.add_argument('--nb_cl', default=40, type=int, help='Classes per group')
+parser.add_argument('--nb_cl_fg', default=20, type=int, help='the number of classes in first group')
+parser.add_argument('--nb_cl', default=20, type=int, help='Classes per group')
 parser.add_argument('--nb_pnum_classes, nb_cl,rotos', default=0, type=int, help='Number of prototypes per class at the end')
 parser.add_argument('--nb_runs', default=1, type=int, help='Number of runs (random ordering of classes at each run)')
 parser.add_argument('--ckp_prefix', default='MUC_LwF_TinyImageNet', type=str, help='Checkpoint prefix')
@@ -78,16 +78,16 @@ lr_strat               = [120, 160, 180]      # Epochs where learning rate gets 
 lr_factor              = 0.1            # Learning rate decrease factor
 custom_weight_decay    = 5e-4           # Weight Decay
 custom_momentum        = 0.9            # Momentum
-epochs                 = 4            # initial = 200
-val_epoch              = 2             # evaluate the model in every val_epoch(initial = 10)
-save_epoch             = 2             # save the model in every save_epoch(initial = 50)
+epochs                 = 200            # initial = 200
+val_epoch              = 10             # evaluate the model in every val_epoch(initial = 10)
+save_epoch             = 50             # save the model in every save_epoch(initial = 50)
 Stage1_flag = True                      # Train new model and new classifier
 stage2_flag = True                      # Train side classifiers with Maximum Classifier Discrepancy  Initial : True
 
 stage2_lr_strat        = [40, 60, 70]
-stage2_epochs          = 4             # initial = 80
-stage2_val_epoch       = 2             # evaluate the model in every stage2_val_epoch(initial = 10)
-stage2_save_epoch      = 2             # save the model in every stage2_save_epoch(initial = 40)
+stage2_epochs          = 80             # initial = 80
+stage2_val_epoch       = 10             # evaluate the model in every stage2_val_epoch(initial = 10)
+stage2_save_epoch      = 40             # save the model in every stage2_save_epoch(initial = 40)
 np.random.seed(args.random_seed)        # Fix the random seed
 print(args)
 ########################################
@@ -132,14 +132,6 @@ top1_acc_cur_list = np.zeros((args.nb_runs, int(args.num_classes/args.nb_cl), in
 X_train_total, Y_train_total = split_images_labels(trainset.imgs)
 X_valid_total, Y_valid_total = split_images_labels(testset.imgs)
 
-transform_train = transforms.Compose([
-    transforms.RandomCrop(32, padding=4),
-    transforms.RandomHorizontalFlip(),
-    #transforms.RandomRotation(10),
-    transforms.ToTensor(),
-    transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-])
-
 ## Load unlabeled data from SVHN
 svhn_data = torchvision.datasets.SVHN(root=args.OOD_dir, download=True, transform=transform_train)
 svhn_num = svhn_data.data.shape[0]
@@ -165,7 +157,7 @@ for n_run in range(args.nb_runs):
 
     start_iter = 0
     for iteration in range(start_iter, int(args.num_classes/args.nb_cl)):
-        # Prepare the training data for the current batch of classes(total class(200)/group class(40))
+        # Prepare the training data for the current batch of classes(total class(200)/group class(20))
         actual_cl        = order[range(iteration*args.nb_cl,(iteration+1)*args.nb_cl)]
         indices_train_subset = np.array([i in order[range(iteration*args.nb_cl,(iteration+1)*args.nb_cl)] for i in Y_train_total]) 
         indices_test_subset  = np.array([i in order[range(0,(iteration+1)*args.nb_cl)] for i in Y_valid_total])
@@ -232,7 +224,7 @@ for n_run in range(args.nb_runs):
             new_fc_side.bias.data[:num_old_classes_side] = ref_model.fc_side.bias.data
             tg_model.fc_side = new_fc_side
             for param in tg_model.parameters():
-                param.requires_grad = True
+                param.requires_grad = False   ##0304
 
 ########### Stage 1: Train Multiple Classifiers for each iteration #################
         if Stage1_flag is True:
@@ -292,7 +284,6 @@ for n_run in range(args.nb_runs):
 
                 if iteration==start_iter:
                     print('Epoch: %d, LR: %.4f, loss_cls: %.6f' % (epoch, tg_lr_scheduler.get_last_lr()[0], loss_cls.item()))
-                    #print(acts)
                 else:
                     print('Epoch: %d, LR: %.4f, loss_cls: %.6f, loss_distill: %.6f' % (epoch, 
                     tg_lr_scheduler.get_last_lr()[0], loss_cls.item(), (loss_distill_main.item() + loss_distill_side.item())))
@@ -302,8 +293,8 @@ for n_run in range(args.nb_runs):
                     tg_model.eval()
                     print("##############################################################")
                     # Calculate validation accuracy of model on the current classes:
+                    print("stage1 iteration :{}".format(iteration))
                     for i in range(iteration):
-                        print("stage1 iteration :{}".format(i))
                         indices_valid_subset_old = np.array([j in order[range(i * args.nb_cl, (i+1) * args.nb_cl)] for j in Y_valid_total])
                         X_valid_old = X_valid_total[indices_valid_subset_old]   ##0224(5)
                         Y_valid_old = Y_valid_total[indices_valid_subset_old]
@@ -312,7 +303,7 @@ for n_run in range(args.nb_runs):
                         evalset.imgs = evalset.samples = ori_eval_set
                         evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size, shuffle=False, num_workers=2)
                         acc_old = compute_accuracy_WI(tg_model, evalloader, 0, args.nb_cl*(iteration+1))
-                        print('Old class(group{}) accuracy: {:.2f} %'.format((i+1),(acc_old)))
+                        print('Old class(group {} ) accuracy: {:.2f} %'.format((i+1),(acc_old)))
                         old_val_list_sub[i] = np.array(acc_old)
 
                     # Calculate validation accuracy of model on the current classes:
@@ -425,8 +416,8 @@ for n_run in range(args.nb_runs):
                 if (stage2_epoch + 1) % stage2_val_epoch == 0:
                     stage2_model.fc_side.eval()
                     print("##############################################################")
+                    print("stage2 iteration :{}".format(iteration))
                     for i in range(iteration):
-                        print("stage2 iteration :{}".format(i))
                         indices_valid_subset_current = np.array([j in order[range(i * args.nb_cl, (i+1) * args.nb_cl)] for j in Y_valid_total])
                         X_stage2_valid_old = X_valid_total[indices_valid_subset_current]   ##0224(5)
                         Y_stage2_valid_old = Y_valid_total[indices_valid_subset_current]
@@ -435,7 +426,7 @@ for n_run in range(args.nb_runs):
                         evalset.imgs = evalset.samples = stage2_eval_set_old
                         stage2_old_evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size, shuffle=False, num_workers=2)
                         stage2_acc_old = compute_accuracy_Version1(stage2_model, stage2_old_evalloader, args.nb_cl, args.side_classifier, i) 
-                        print('Old class(group{}) accuracy: {:.2f} %'.format((i+1),(stage2_acc_old)))
+                        print('Old class(group {} ) accuracy: {:.2f} %'.format((i+1),(stage2_acc_old)))
                         # print("##############################################################")
                         stage2_old_val_list_sub[i] = np.array(stage2_acc_old)
 

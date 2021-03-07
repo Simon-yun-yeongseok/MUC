@@ -32,11 +32,41 @@ def compute_accuracy_WI(tg_model, evalloader, start_class, end_class):
             outputs = F.softmax(outputs, dim=1)
             _, predicted = outputs.max(1)
 
-        correct += predicted.eq(targets).sum().item()
+            correct += predicted.eq(targets).sum().item()
 
     cnn_acc = 100.*correct/total
 
     return cnn_acc
+
+def compute_accuracy_Version1(tg_model, evalloader, nb_cl, nclassifier, iteration):
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    #tg_feature_model.eval()
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for batch_idx, (inputs, targets) in enumerate(evalloader):
+            inputs, targets = inputs.to(device), targets.to(device)
+            total += targets.size(0)
+            outputs = tg_model(inputs, side_fc=True)
+            #outputs = F.softmax(outputs, dim=1)
+            real_classes = int(outputs.size(1)/nclassifier)
+            nstep = iteration+1
+            outputs_sum = torch.zeros(outputs.size(0), real_classes).to(device)
+            ##
+            for i in range(nstep):
+                start = nb_cl*nclassifier*i
+                for j in range(nclassifier):
+                    end = start+nb_cl
+                    outputs_sum[:, i*nb_cl:(i+1)*nb_cl] += outputs[:, start:end]
+                    start = end
+            outputs_sum = F.softmax(outputs_sum, dim=1)
+            _, predicted = outputs_sum.max(1)
+            correct += predicted.eq(targets).sum().item()
+
+    cnn_acc = 100. * correct / total
+
+    return cnn_acc
+
 
 class TEST:
     def __init__(self, epochs=200, val_epoch=10, num_classes=100, nb_cl=20):
@@ -62,41 +92,3 @@ class TEST:
                 # for j in range(int(self.num_classes/self.nb_cl)):
                 #     correct[i][j] = predicted1.eq(targets).sum().item()
         return correct
-
-def compute_accuracy_Version1(tg_model, evalloader, nb_cl, nclassifier, iteration):
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    #tg_feature_model.eval()
-    correct = 0
-    total = 0
-    with torch.no_grad():
-        for batch_idx, (inputs, targets) in enumerate(evalloader):
-            inputs, targets = inputs.to(device), targets.to(device)
-            total += targets.size(0)
-            #targets = targets - start_class
-            outputs = tg_model(inputs, side_fc=True)
-            #outputs = F.softmax(outputs, dim=1)
-            real_classes = int(outputs.size(1)/nclassifier)
-            nstep = iteration+1
-            outputs_sum = torch.zeros(outputs.size(0), real_classes).to(device)
-            ##
-            for i in range(nstep):
-                start = nb_cl*nclassifier*i
-                for j in range(nclassifier):
-                    end = start+nb_cl
-                    outputs_sum[:, i*nb_cl:(i+1)*nb_cl] += outputs[:, start:end]
-                    start = end
-
-            # for i in range(nstep):
-            #     start = nb_cl*nclassifier*i
-            #     outputs_1 = F.softmax(outputs[:, start:start+nb_cl], dim=1)
-            #     outputs_2 = F.softmax(outputs[:, start+nb_cl:start + 2*nb_cl], dim=1)
-            #     ratio = torch.sum(torch.abs(outputs_1 - outputs_2), 1)
-            #     outputs_sum[:, i*nb_cl:(i+1)*nb_cl] = outputs_1 #(outputs_1+outputs_2) * torch.unsqueeze(2.0 - ratio, 1)
-
-            outputs_sum = F.softmax(outputs_sum, dim=1)
-            _, predicted = outputs_sum.max(1)
-            correct += predicted.eq(targets).sum().item()
-
-    cnn_acc = 100. * correct / total
-
-    return cnn_acc
