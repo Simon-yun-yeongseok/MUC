@@ -79,7 +79,7 @@ class Bottleneck(nn.Module):
 
 class ResNet(nn.Module):
     
-    def __init__(self, block, layers, num_classes=20):
+    def __init__(self, block, layers, num_classes=40):
         self.inplanes = 16
         super(ResNet, self).__init__()
         self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1,
@@ -173,7 +173,7 @@ class ResNet_feature(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def forward(self, x, side_fc=False):
+    def forward(self, x):
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
@@ -184,10 +184,12 @@ class ResNet_feature(nn.Module):
 
         x = self.avgpool(x)
         x = x.view(x.size(0), -1)
+        a = nn.Conv2d(x.shape(0), x.shape(1), stride=1)  ### 1*1 conv
+        y = x*a
         ####################### feature layer???
         x = self.fc(x)
 
-        return x
+        return x, y
 
 
 def resnet20(pretrained=False, **kwargs):
@@ -198,6 +200,11 @@ def resnet20(pretrained=False, **kwargs):
 def resnet32(pretrained=False, **kwargs):
     n = 5
     model = ResNet(BasicBlock, [n, n, n], **kwargs)
+    return model
+
+def resnet32_feature(pretrained=False, **kwargs):
+    n = 5
+    model = ResNet_feature(BasicBlock, [n, n, n], **kwargs)  ############# x만 받게 바꾸기
     return model
 
 def resnet56(pretrained=False, **kwargs):

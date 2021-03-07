@@ -115,7 +115,7 @@ stage1_acc_list = np.zeros((int(args.num_classes/args.nb_cl), int(args.num_class
 
 X_train_total = np.array(trainset.data)
 Y_train_total = np.array(trainset.targets)
-X_valid_total = np.array(testset.data)     
+X_valid_total = np.array(testset.data)
 Y_valid_total = np.array(testset.targets)
 
 # Launch the different runs
@@ -173,8 +173,8 @@ for n_run in range(args.nb_runs):
             Y_valid_ori = Y_valid_total[indices_test_subset_ori]
         
         if iteration == start_iter:
-            # base classes
             tg_model = resnet_model.resnet32(num_classes=args.nb_cl)
+            # tg_model = resnet_model.resnet32_feature(num_classes=args.nb_cl)  ############  0308
             tg_model = tg_model.to(device)
             ref_model = None
             num_old_classes = 0
