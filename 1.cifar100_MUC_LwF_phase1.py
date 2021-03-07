@@ -83,7 +83,6 @@ print(args)
 Stage1_flag = True  # Train new model and new classifier
 Stage3_flag = False  # Train side classifiers with Maximum Classifier Discrepancy  Initial : True
 ########################################
-# accuracy_test = TEST(epochs, val_epoch, args.num_classes, args.nb_cl)
 
 transform_train = transforms.Compose([
     # transforms.RandomCrop(32, padding=4),

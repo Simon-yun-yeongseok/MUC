@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# coding=utf-8
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -132,6 +130,14 @@ top1_acc_cur_list = np.zeros((args.nb_runs, int(args.num_classes/args.nb_cl), in
 X_train_total, Y_train_total = split_images_labels(trainset.imgs)
 X_valid_total, Y_valid_total = split_images_labels(testset.imgs)
 
+transform_train = transforms.Compose([
+    transforms.RandomCrop(32, padding=4),
+    transforms.RandomHorizontalFlip(),
+    #transforms.RandomRotation(10),
+    transforms.ToTensor(),
+    transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+])
+
 ## Load unlabeled data from SVHN
 svhn_data = torchvision.datasets.SVHN(root=args.OOD_dir, download=True, transform=transform_train)
 svhn_num = svhn_data.data.shape[0]
@@ -195,7 +201,7 @@ for n_run in range(args.nb_runs):
         
         if iteration == start_iter:
             # base classes
-            tg_model = resnet_model.resnet32(num_classes=args.nb_cl, side_classifier=args.side_classifier)  # gmpark
+            tg_model = resnet_model.resnet32(num_classes=args.nb_cl, side_classifier=args.side_classifier)
             tg_model = tg_model.to(device)
             ref_model = None
             num_old_classes = 0
