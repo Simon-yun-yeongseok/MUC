@@ -21,6 +21,7 @@ import resnet_model
 import utils_pytorch
 import pandas
 from compute_accuracy import compute_accuracy_WI, compute_accuracy_Version1
+import resnet_model_copy
 import time
 
 start = time.localtime()
@@ -164,7 +165,7 @@ for n_run in range(args.nb_runs):
         
         # Add the stored exemplars to the training data
         if iteration == start_iter:
-            X_valid_ori = X_valid
+            X_valid_ori = X_valid 
             Y_valid_ori = Y_valid
                         
         else:
@@ -173,8 +174,8 @@ for n_run in range(args.nb_runs):
             Y_valid_ori = Y_valid_total[indices_test_subset_ori]
         
         if iteration == start_iter:
-            tg_model = resnet_model.resnet32(num_classes=args.nb_cl)
-            # tg_model = resnet_model.resnet32_feature(num_classes=args.nb_cl)  ############  0308
+            # tg_model = resnet_model.resnet32(num_classes=args.nb_cl)
+            tg_model = resnet_model_copy.resnet32_feature(num_classes=args.nb_cl)  ############  0308
             tg_model = tg_model.to(device)
             ref_model = None
             num_old_classes = 0
@@ -212,9 +213,10 @@ for n_run in range(args.nb_runs):
                         targets = targets.to(device)
 
                     if iteration == start_iter:
-                        outputs = tg_model(inputs)
+                        outputs, featuer2 = tg_model(inputs)
                         loss_cls = cls_criterion(outputs[:, num_old_classes:(num_old_classes+args.nb_cl)], targets)
                         loss = loss_cls
+                        exit()
     
                     else:
                         targets = targets - args.nb_cl * iteration

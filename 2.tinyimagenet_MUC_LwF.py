@@ -230,7 +230,7 @@ for n_run in range(args.nb_runs):
             new_fc_side.bias.data[:num_old_classes_side] = ref_model.fc_side.bias.data
             tg_model.fc_side = new_fc_side
             for param in tg_model.parameters():
-                param.requires_grad = False   ##0304
+                param.requires_grad = True   ##0304
 
 ########### Stage 1: Train Multiple Classifiers for each iteration #################
         if Stage1_flag is True:
