@@ -1,3 +1,4 @@
+import pdb
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,7 +8,6 @@ import torchvision
 from torchvision import datasets, models, transforms
 from torch.autograd import Variable
 import numpy as np
-import time
 import os
 import sys
 import copy
@@ -17,17 +17,15 @@ try:
     import cPickle as pickle
 except:
     import pickle
-import resnet_model
+import resnet_model_feature
 import utils_pytorch
 import pandas
 from compute_accuracy import compute_accuracy_WI, compute_accuracy_Version1
 import resnet_model_copy
 import time
+import random
 
 start = time.localtime()
-
-global device
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 if torch.cuda.is_available():
     print("cuda is available")
@@ -58,11 +56,21 @@ parser.add_argument('--stage2_flag', default='True', action='store_true', help='
 parser.add_argument('--memory_budget', default=2000, type=int, help='Exemplars of old classes')
 args = parser.parse_args()
 
+# Set random seeds.
+torch.backends.cudnn.deterministic = True
+random.seed(args.random_seed)
+np.random.seed(args.random_seed)
+torch.manual_seed(args.random_seed)
+torch.cuda.manual_seed_all(args.random_seed)
+
 ckp_prefix = './checkpoint/{}/MUC_LwF/step_{}_K_{}/'.format(args.dataset, args.nb_cl, args.side_classifier)
 
 def variable(t: torch.Tensor, use_cuda=True, **kwargs):
     t = t.to(device)
     return Variable(t, **kwargs)
+
+global device
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 ########################################
@@ -76,10 +84,10 @@ lr_strat               = [120, 160, 180]      # Epochs where learning rate gets 
 lr_factor              = 0.1            # Learning rate decrease factor
 custom_weight_decay    = 5e-4           # Weight Decay
 custom_momentum        = 0.9            # Momentum
-epochs                 = 4            # initial = 200
-val_epoch              = 2             # evaluate the model in every val_epoch(initial = 10)
-save_epoch             = 2             # save the model in every save_epoch(initial = 50)
-np.random.seed(args.random_seed)        # Fix the random seed
+epochs                 = 200            # initial = 200
+val_epoch              = 10             # evaluate the model in every val_epoch(initial = 10)
+save_epoch             = 50             # save the model in every save_epoch(initial = 50)
+# np.random.seed(args.random_seed)        # Fix the random seed
 print(args)
 Stage1_flag = True  # Train new model and new classifier
 stage2_flag = True  # Train side classifiers with Maximum Classifier Discrepancy  Initial : True
@@ -99,9 +107,9 @@ transform_test = transforms.Compose([
 
 
 trainset = torchvision.datasets.CIFAR100(root=args.dataset_dir, train=True,
-                                        download=True, transform=transform_train)
+                                        download=False, transform=transform_train)
 testset = torchvision.datasets.CIFAR100(root=args.dataset_dir, train=False,
-                                       download=True, transform=transform_test)
+                                       download=False, transform=transform_test)
 evalset = torchvision.datasets.CIFAR100(root=args.dataset_dir, train=False,
                                        download=False, transform=transform_test)
 
@@ -174,8 +182,7 @@ for n_run in range(args.nb_runs):
             Y_valid_ori = Y_valid_total[indices_test_subset_ori]
         
         if iteration == start_iter:
-            # tg_model = resnet_model.resnet32(num_classes=args.nb_cl)
-            tg_model = resnet_model_copy.resnet32_feature(num_classes=args.nb_cl)  ############  0308
+            tg_model = resnet_model_feature.resnet32(num_classes=args.nb_cl)  ############  0308
             tg_model = tg_model.to(device)
             ref_model = None
             num_old_classes = 0
@@ -213,10 +220,9 @@ for n_run in range(args.nb_runs):
                         targets = targets.to(device)
 
                     if iteration == start_iter:
-                        outputs, featuer2 = tg_model(inputs)
+                        outputs = tg_model(inputs)
                         loss_cls = cls_criterion(outputs[:, num_old_classes:(num_old_classes+args.nb_cl)], targets)
                         loss = loss_cls
-                        exit()
     
                     else:
                         targets = targets - args.nb_cl * iteration
@@ -237,7 +243,6 @@ for n_run in range(args.nb_runs):
                     tg_optimizer.zero_grad()
                     loss.backward()
                     tg_optimizer.step()
-                tg_lr_scheduler.step()  ###ㅣlearning rate
 
                 if iteration==start_iter:
                     print('Epoch: %d, LR: %.4f, loss_cls: %.4f' % (epoch, tg_lr_scheduler.get_last_lr()[0], loss_cls.item()))
@@ -298,6 +303,7 @@ for n_run in range(args.nb_runs):
                     tg_model.train()
                     print("##############################################################")
                 
+                tg_lr_scheduler.step()
                 # Save the val set
                 if (epoch + 1) % save_epoch == 0:
                     if not os.path.isdir(ckp_prefix):                                                           
@@ -305,6 +311,14 @@ for n_run in range(args.nb_runs):
                     ckp_name = os.path.join(ckp_prefix + 'MCD_ResNet32_Model_run_{}_step_{}.pth'.format(n_run, iteration))
                     file = open('{}'.format(ckp_name),'w')
                     torch.save(tg_model.state_dict(), ckp_name)
+                
+                ## 초도 확인용
+                if (epoch + 1) == 200:
+                    print("stage1_acc_list")
+                    print(stage1_acc_list)
+                    print("##############################################################")
+                    exit()
+
 
 ##################################################################
         # Final save of the results
@@ -312,6 +326,7 @@ for n_run in range(args.nb_runs):
         ckp_name = os.path.join(ckp_prefix + 'LwF_top1_acc_list.mat')
         sio.savemat(ckp_name, {'accuracy': stage1_acc_list})
         file.close()
+    pdb.set_trace()
 
 ##################################################################
 print("##############################################################")
