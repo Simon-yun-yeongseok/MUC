@@ -21,7 +21,6 @@ import resnet_model_feature
 import utils_pytorch
 import pandas
 from compute_accuracy import compute_accuracy_WI, compute_accuracy_Version1
-import resnet_model_copy
 import time
 import random
 
@@ -49,14 +48,14 @@ parser.add_argument('--val_epoch', default=10, type=int, help='Epochs')
 parser.add_argument('--T', default=2, type=float, help='Temperature for distialltion')
 parser.add_argument('--beta', default=0.25, type=float, help='Beta for distialltion')
 parser.add_argument('--resume', default='True', action='store_true', help='resume from checkpoint')
-parser.add_argument('--random_seed', default=0, type=int, help='random seed')
+parser.add_argument('--random_seed', default=20, type=int, help='random seed')
 parser.add_argument('--cuda', default=True, help='enables cuda')
 parser.add_argument('--side_classifier', default=1, type=int, help='multiple classifiers') ##default 3
 parser.add_argument('--stage2_flag', default='True', action='store_true', help='multiple classifiers')
 parser.add_argument('--memory_budget', default=2000, type=int, help='Exemplars of old classes')
 args = parser.parse_args()
 
-# Set random seeds.
+# # Set random seeds.
 torch.backends.cudnn.deterministic = True
 random.seed(args.random_seed)
 np.random.seed(args.random_seed)

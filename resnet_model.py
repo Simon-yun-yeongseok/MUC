@@ -79,7 +79,7 @@ class Bottleneck(nn.Module):
 
 class ResNet(nn.Module):
     
-    def __init__(self, block, layers, num_classes=40):
+    def __init__(self, block, layers, num_classes=40, side_classifier = 3):
         self.inplanes = 16
         super(ResNet, self).__init__()
         self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1,
@@ -91,6 +91,7 @@ class ResNet(nn.Module):
         self.layer3 = self._make_layer(block, 64, layers[2], stride=2)
         self.avgpool = nn.AvgPool2d(8, stride=1)
         self.fc = nn.Linear(64 * block.expansion, num_classes)
+        self.fc_side = nn.Linear(64 * block.expansion, num_classes*side_classifier)
         
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -159,12 +160,9 @@ class ResNet_feature(nn.Module):
     def _make_layer(self, block, planes, blocks, stride=1):
         downsample = None
         if stride != 1 or self.inplanes != planes * block.expansion:
-            downsample = nn.Sequential(
-                nn.Conv2d(self.inplanes, planes * block.expansion,
+            downsample = nn.Sequential(nn.Conv2d(self.inplanes, planes * block.expansion,
                           kernel_size=1, stride=stride, bias=False),
-                nn.BatchNorm2d(planes * block.expansion),
-            )
-
+                          nn.BatchNorm2d(planes * block.expansion),)
         layers = []
         layers.append(block(self.inplanes, planes, stride, downsample))
         self.inplanes = planes * block.expansion
@@ -173,7 +171,7 @@ class ResNet_feature(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def forward(self, x):
+    def forward(self, x, a, y):
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
@@ -184,10 +182,12 @@ class ResNet_feature(nn.Module):
 
         x = self.avgpool(x)
         x = x.view(x.size(0), -1)
-        a = nn.Conv2d(x.shape(0), x.shape(1), stride=1)  ### 1*1 conv
+        # print(x.size(0),x.size(1))
+        a = nn.Conv2d(x.size(0), x.size(1), stride=1)  ### 1*1 conv
         y = x*a
         ####################### feature layer???
         x = self.fc(x)
+        exit()
 
         return x, y
 
@@ -204,9 +204,14 @@ def resnet32(pretrained=False, **kwargs):
 
 def resnet32_feature(pretrained=False, **kwargs):
     n = 5
-    model = ResNet_feature(BasicBlock, [n, n, n], **kwargs)  ############# x만 받게 바꾸기
+    model = ResNet_feature(BasicBlock, [n, n, n], **kwargs)  
     return model
 
+def resnet32_feature(pretrained=False, **kwargs):
+    n = 5
+    model = ResNet_feature(BasicBlock, [n, n, n], **kwargs)  
+    return model
+    
 def resnet56(pretrained=False, **kwargs):
     n = 9
     model = ResNet(Bottleneck, [n, n, n], **kwargs)

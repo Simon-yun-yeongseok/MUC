@@ -9,7 +9,7 @@ from torch.autograd import Variable
 def conv3x3(in_planes, out_planes, stride=1):
     """3x3 convolution with padding"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
-                     padding=1, bias=False)
+                     padding=1, bias=False)   ##0315
 
 class BasicBlock(nn.Module):
     expansion = 1
@@ -98,15 +98,16 @@ class ResNet(nn.Module):
 
         self.sub_f = nn.Sequential(
             nn.Conv2d(64, self.outplanes, kernel_size=1, stride=1, bias=False),
-            nn.BatchNorm2d(self.outplanes),
-            nn.ReLU(inplace=True)
+            # nn.BatchNorm2d(self.outplanes),
+            # nn.ReLU(inplace=True)
         )
-        
-        self.fc = nn.Linear(64 * block.expansion, num_classes)
-        self.fc_side = nn.Linear(64 * block.expansion, num_classes*side_classifier)  # original
-        # self.fc = nn.Linear(64 * block.expansion + self.outplanes, num_classes)
-        # self.fc_side = nn.Linear(64 * block.expansion + self.outplanes, num_classes*side_classifier)
-        
+        self.sub_Avg = nn.AvgPool2d(1, stride=1)
+
+        # self.fc = nn.Linear(64, num_classes)
+        # self.fc_side = nn.Linear(64, num_classes*side_classifier)  # original
+        self.fc = nn.Linear(64 * block.expansion + self.outplanes, num_classes)        # version 1
+        self.fc3 = nn.Linear(1, num_classes)                                       # version 3
+
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
@@ -142,23 +143,29 @@ class ResNet(nn.Module):
 
         x = self.avgpool(x)
         sf = self.sub_f(x)
+        sub_Avg = self.sub_Avg(x)     # [Batch, 64]
 
         x = x.view(x.size(0), -1)     # [Batch, 64]
         sf = sf.view(sf.size(0), -1)  # [Batch, self.outplanes]
+        sub_Avg = sub_Avg.view(sub_Avg.size(0), -1)  # [Batch, self.outplanes]
 
         ## Ver1. concatenate #
-        # x = torch.cat((x, sf), dim=1)  # [Batch, 64 + self.outplanes]
+        x = torch.cat((x, sf), dim=1)  # [Batch, 64 + self.outplanes]
 
         # Ver2. replace the one that has max diff #
-        for batch in range(x.size(0)):
-            if self.outplane != 1:
-                for i in range(self.outplane):
-                    sf[batch] = sf[batch]   ## 반가르기
-            diff = (x[batch] - sf[batch].repeat(x[batch].size(0))).data.tolist()
-            max_ind = diff.index(max(diff))
-            x[batch, max_ind] = Variable(sf[batch])
-        
-        x = self.fc(x)  # [Batch, 64 + self.outplanes] -> [Batch, num_classes]
+        # for batch in range(x.size(0)):
+        #     replace = int(x[batch].size(0) / self.outplanes)    # yunys
+        #     diff = (x[batch] - sf[batch].repeat(replace)).data.tolist()
+        #     max_ind = int(diff.index(max(diff)) / self.outplanes)
+        #     # min_ind = int(diff.index(min(diff)) / self.outplanes)
+        #     x[batch, max_ind] = Variable(sf[batch])
+
+        # Ver3. set parallel the conv & Avgpool #
+        # pdb.set_trace()
+        # sub_Avg = self.fc(sub_Avg)  # [Batch, 64] -> [Batch, num_classes]
+        # sf = self.fc3(sf)           # [Batch,  1] -> [Batch, num_classes]
+        x = self.fc(x)              # [Batch, 64] -> [Batch, num_classes]
+        # x = x + sf + sub_Avg
 
         return x
 
