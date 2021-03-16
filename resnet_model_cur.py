@@ -4,12 +4,13 @@ import torch
 import pdb
 import torch.utils.model_zoo as model_zoo
 from torch.autograd import Variable
+import torch.nn.functional as F
 
 
 def conv3x3(in_planes, out_planes, stride=1):
     """3x3 convolution with padding"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
-                     padding=1, bias=False)   ##0315
+                     padding=1, bias=False)
 
 class BasicBlock(nn.Module):
     expansion = 1
@@ -83,9 +84,10 @@ class Bottleneck(nn.Module):
 
 class ResNet(nn.Module):
     
-    def __init__(self, block, layers, num_classes=40, side_classifier = 3):
+    def __init__(self, block, layers, num_classes=40, side_classifier=3, is_sub_f=False):
         self.inplanes = 16
-        self.outplanes = 2 # gmpark
+        self.outplanes = 1 # gmpark
+        self.is_sub_f = is_sub_f
         super(ResNet, self).__init__()
         self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1,
                                bias=False)
@@ -96,18 +98,25 @@ class ResNet(nn.Module):
         self.layer3 = self._make_layer(block, 64, layers[2], stride=2)
         self.avgpool = nn.AvgPool2d(8, stride=1)
 
-        self.sub_f = nn.Sequential(
-            nn.Conv2d(64, self.outplanes, kernel_size=1, stride=1, bias=False),
-            # nn.BatchNorm2d(self.outplanes),
-            # nn.ReLU(inplace=True)
-        )
-        self.sub_Avg = nn.AvgPool2d(1, stride=1)
-
-        # self.fc = nn.Linear(64, num_classes)
-        # self.fc_side = nn.Linear(64, num_classes*side_classifier)  # original
-        self.fc = nn.Linear(64 * block.expansion + self.outplanes, num_classes)        # version 1
-        self.fc3 = nn.Linear(1, num_classes)                                       # version 3
-
+        if self.is_sub_f:
+            self.sub_f = nn.Sequential(
+                nn.Conv2d(64, self.outplanes, kernel_size=1, stride=1, bias=False),
+                nn.BatchNorm2d(self.outplanes),
+                # nn.ReLU(inplace=True)
+                # nn.Sigmoid()
+            )
+            # Ver.1 - Concat
+            # self.fc = nn.Linear(64 * block.expansion + self.outplanes, num_classes)
+            # self.fc_side = nn.Linear(64 * block.expansion + self.outplanes, num_classes*side_classifier)
+            # Ver.2 - Replace
+            self.fc = nn.Linear(64 * block.expansion, num_classes)
+            self.fc_side = nn.Linear(64 * block.expansion, num_classes*side_classifier)  # original
+            # Ver.3 - AvgPool
+            # self.sub_Avg = nn.AvgPool2d(8, stride=1)
+        else:
+            self.fc = nn.Linear(64 * block.expansion, num_classes)
+            self.fc_side = nn.Linear(64 * block.expansion, num_classes*side_classifier)  # original
+        
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
@@ -142,32 +151,39 @@ class ResNet(nn.Module):
         x = self.layer3(x)
 
         x = self.avgpool(x)
-        sf = self.sub_f(x)
-        sub_Avg = self.sub_Avg(x)     # [Batch, 64]
+        
+        if self.is_sub_f:
+            sf = self.sub_f(x)
+            sf = sf.view(sf.size(0), -1)  # [Batch, self.outplanes]
 
         x = x.view(x.size(0), -1)     # [Batch, 64]
-        sf = sf.view(sf.size(0), -1)  # [Batch, self.outplanes]
-        sub_Avg = sub_Avg.view(sub_Avg.size(0), -1)  # [Batch, self.outplanes]
 
-        ## Ver1. concatenate #
-        x = torch.cat((x, sf), dim=1)  # [Batch, 64 + self.outplanes]
+        if self.is_sub_f:
+            # Ver1. concatenate #
+            # x = torch.cat((x, sf), dim=1)  # [Batch, 64 + self.outplanes]
 
-        # Ver2. replace the one that has max diff #
-        # for batch in range(x.size(0)):
-        #     replace = int(x[batch].size(0) / self.outplanes)    # yunys
-        #     diff = (x[batch] - sf[batch].repeat(replace)).data.tolist()
-        #     max_ind = int(diff.index(max(diff)) / self.outplanes)
-        #     # min_ind = int(diff.index(min(diff)) / self.outplanes)
-        #     x[batch, max_ind] = Variable(sf[batch])
+            # Ver2. replace the one that has max diff #
+            for batch in range(x.size(0)):
+                diff = (x[batch] - sf[batch].repeat(x[batch].size(0))).data.tolist()
+                max_ind = diff.index(max(diff))
+                x[batch, max_ind] = Variable(sf[batch])
+                # Ver2-1. replace two max diff.
+                # diff[max_ind] = -10000
+                # max_ind2 = diff.index(max(diff))
+                # x[batch, max_ind2] = Variable(sf[batch])
+            
+            # Ver3. Masking
+            xm = copy.deepcopy(x)
+            for batch in range(x.size(0)):
+                xm[batch] = Variable(x[batch] * F.sigmoid(sf[batch]).repeat(x[batch].size(0)))
 
-        # Ver3. set parallel the conv & Avgpool #
-        # pdb.set_trace()
-        # sub_Avg = self.fc(sub_Avg)  # [Batch, 64] -> [Batch, num_classes]
-        # sf = self.fc3(sf)           # [Batch,  1] -> [Batch, num_classes]
-        x = self.fc(x)              # [Batch, 64] -> [Batch, num_classes]
-        # x = x + sf + sub_Avg
+        if side_fc is False:
+            x = self.fc(x)  # [Batch, 64 + self.outplanes] -> [Batch, num_classes]
+            xm = self.fc(xm)
+        else:
+            x = self.fc_side(x)
 
-        return x
+        return x, xm
 
 def resnet20(pretrained=False, **kwargs):
     n = 3
@@ -178,7 +194,7 @@ def resnet32(pretrained=False, **kwargs):
     n = 5
     model = ResNet(BasicBlock, [n, n, n], **kwargs)
     return model
-    
+   
 def resnet56(pretrained=False, **kwargs):
     n = 9
     model = ResNet(Bottleneck, [n, n, n], **kwargs)
