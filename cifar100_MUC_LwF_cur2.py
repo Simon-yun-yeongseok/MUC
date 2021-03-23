@@ -45,11 +45,12 @@ parser.add_argument('--val_epoch', default=10, type=int, help='Epochs')
 parser.add_argument('--T', default=2, type=float, help='Temperature for distialltion')
 parser.add_argument('--beta', default=0.25, type=float, help='Beta for distialltion')
 parser.add_argument('--resume', default='True', action='store_true', help='resume from checkpoint')
-parser.add_argument('--random_seed', default=20, type=int, help='random seed')
+parser.add_argument('--random_seed', default=3, type=int, help='random seed')
 parser.add_argument('--cuda', default=True, help='enables cuda')
 parser.add_argument('--side_classifier', default=1, type=int, help='multiple classifiers')  # gmpark
 parser.add_argument('--Stage3_flag', default='True', action='store_true', help='multiple classifiers')
 parser.add_argument('--memory_budget', default=2000, type=int, help='Exemplars of old classes')
+parser.add_argument('--sub_f', action='store_false', help='apply sub_f.')
 args = parser.parse_args()
 # Set random seeds.                     # Fix the random seed
 torch.backends.cudnn.deterministic = True
@@ -137,7 +138,8 @@ for n_run in range(args.nb_runs):
     print(order_list)
 
     start_iter = 0
-    for iteration in range(start_iter, int(args.num_classes/args.nb_cl)):
+    # for iteration in range(start_iter, int(args.num_classes/args.nb_cl)):
+    for iteration in range(start_iter, 1):
         # Prepare the training data for the current batch of classes
         actual_cl        = order[range(iteration*args.nb_cl,(iteration+1)*args.nb_cl)]
         indices_train_subset = np.array([i in order[range(iteration*args.nb_cl,(iteration+1)*args.nb_cl)] for i in Y_train_total])
@@ -176,7 +178,7 @@ for n_run in range(args.nb_runs):
 
         if iteration == start_iter:
             # base classes
-            tg_model = resnet_model.resnet32(num_classes=args.nb_cl, side_classifier=args.side_classifier)  # gmpark
+            tg_model = resnet_model_cur.resnet32(num_classes=args.nb_cl, side_classifier=args.side_classifier, is_sub_f=args.sub_f)  # gmpark
             tg_model = tg_model.to(device)
             ref_model = None
             num_old_classes = 0
@@ -227,6 +229,7 @@ for n_run in range(args.nb_runs):
 
                     if iteration == start_iter:
                         outputs = tg_model(inputs, side_fc=False)
+                        # outputs, outputs_m = tg_model(inputs, side_fc=False)
                         loss_cls = cls_criterion(outputs[:, num_old_classes:(num_old_classes+args.nb_cl)], targets)
                         loss = loss_cls
                     else:
@@ -296,11 +299,11 @@ for n_run in range(args.nb_runs):
                     evalset.test_labels = map_Y_valid_cur
                     evalloader = torch.utils.data.DataLoader(evalset, batch_size=eval_batch_size, shuffle=False, num_workers=2)
                     acc_cur = compute_accuracy_WI(tg_model, evalloader, 0, args.nb_cl*(iteration+1))
-                    if acc_cur > acc_best:
-                        acc_best = acc_cur
                     print('New classes accuracy: {:.2f} %'.format(acc_cur))
                     # Calculate validation error of model on the cumul of classes:
                     acc = compute_accuracy_WI(tg_model, testloader, 0, args.nb_cl*(iteration+1))
+                    if acc > acc_best:
+                        acc_best = acc
                     print('Total accuracy: {:.2f} %'.format(acc))
                     print('Best accuracy: {:.2f} %'.format(acc_best))
                     print("##############################################################")
@@ -320,22 +323,22 @@ for n_run in range(args.nb_runs):
 
 ##################################################################
         # Final save of the results
-        print("Save accuracy results for iteration {}".format(iteration))
-        ckp_name = os.path.join(ckp_prefix + 'LwF_top1_acc_list.mat')
-        sio.savemat(ckp_name, {'accuracy': stage1_acc_list})
-        file.close()
+        # print("Save accuracy results for iteration {}".format(iteration))
+        # ckp_name = os.path.join(ckp_prefix + 'LwF_top1_acc_list.mat')
+        # sio.savemat(ckp_name, {'accuracy': stage1_acc_list})
+        # file.close()
 
 ##################################################################
 print("##############################################################")
 print('Final accuracies of each group')
 print()
 print("stage1_acc_list")
-print(stage1_acc_list)
+# print(stage1_acc_list)
 print()
+print('Best accuracy: {:.2f} %'.format(acc_best))
 # print(top1_acc_list)
 print("##############################################################")
 end = time.localtime()
-
-print("Start time : %04d.%02d.%02d %02d:%02d:%02d" % (start.tm_year, start.tm_mon, start.tm_mday, start.tm_hour, start.tm_min, start.tm_sec))
-print("End time   : %04d.%02d.%02d %02d:%02d:%02d" % (end.tm_year, end.tm_mon, end.tm_mday, end.tm_hour, end.tm_min, end.tm_sec))
+diff_time = end-start
+print("Duar time : %04d.%02d.%02d %02d:%02d:%02d" % (diff_time.tm_year, diff_time.tm_mon, diff_time.tm_mday, diff_time.tm_hour, diff_time.tm_min, diff_time.tm_sec))
 

@@ -4,6 +4,7 @@ import torch
 import pdb
 import torch.utils.model_zoo as model_zoo
 from torch.autograd import Variable
+import copy
 import torch.nn.functional as F
 
 
@@ -97,22 +98,38 @@ class ResNet(nn.Module):
         self.layer2 = self._make_layer(block, 32, layers[1], stride=2)
         self.layer3 = self._make_layer(block, 64, layers[2], stride=2)
         self.avgpool = nn.AvgPool2d(8, stride=1)
+        self.module_list = nn.ModuleList()
 
         if self.is_sub_f:
             self.sub_f = nn.Sequential(
                 nn.Conv2d(64, self.outplanes, kernel_size=1, stride=1, bias=False),
-                nn.BatchNorm2d(self.outplanes),
+                # nn.BatchNorm2d(self.outplanes),
                 # nn.ReLU(inplace=True)
                 # nn.Sigmoid()
             )
             # Ver.1 - Concat
             # self.fc = nn.Linear(64 * block.expansion + self.outplanes, num_classes)
             # self.fc_side = nn.Linear(64 * block.expansion + self.outplanes, num_classes*side_classifier)
-            # Ver.2 - Replace
+            # Ver.2 - Replace, Ver.3 - Masking
             self.fc = nn.Linear(64 * block.expansion, num_classes)
             self.fc_side = nn.Linear(64 * block.expansion, num_classes*side_classifier)  # original
-            # Ver.3 - AvgPool
-            # self.sub_Avg = nn.AvgPool2d(8, stride=1)
+            # Ver.4 - AvgPool
+            # self.module_list.append(nn.Conv2d(64, 64, kernel_size=1, stride=1, bias=False),)
+            # self.module_list.append(nn.Sequential(nn.AdaptiveAvgPool2d((1, 1)),
+            #                         nn.Conv2d(64, 64, 1, bias=False),
+            #                         nn.BatchNorm2d(64),
+            #                         nn.ReLU()
+            #                         ))
+            # for i, m in enumerate(self.module_list):
+            #     if i == 0:
+            #         m.weight.data.normal_(0, 0.01)
+            #     else:
+            #         for n in m:
+            #             if isinstance(n, nn.Conv2d):
+            #                 n.weight.data.normal_(0, 0.01)
+            #             elif isinstance(n, nn.BatchNorm2d):
+            #                 n.weight.data.fill_(1)
+            #                 n.bias.data.zero_()                        
         else:
             self.fc = nn.Linear(64 * block.expansion, num_classes)
             self.fc_side = nn.Linear(64 * block.expansion, num_classes*side_classifier)  # original
@@ -162,28 +179,29 @@ class ResNet(nn.Module):
             # Ver1. concatenate #
             # x = torch.cat((x, sf), dim=1)  # [Batch, 64 + self.outplanes]
 
-            # Ver2. replace the one that has max diff #
+            # # Ver2. replace the one that has max diff #
             for batch in range(x.size(0)):
                 diff = (x[batch] - sf[batch].repeat(x[batch].size(0))).data.tolist()
                 max_ind = diff.index(max(diff))
                 x[batch, max_ind] = Variable(sf[batch])
-                # Ver2-1. replace two max diff.
-                # diff[max_ind] = -10000
-                # max_ind2 = diff.index(max(diff))
-                # x[batch, max_ind2] = Variable(sf[batch])
             
             # Ver3. Masking
-            xm = copy.deepcopy(x)
-            for batch in range(x.size(0)):
-                xm[batch] = Variable(x[batch] * F.sigmoid(sf[batch]).repeat(x[batch].size(0)))
+            # xm = copy.deepcopy(x)
+            # for batch in range(x.size(0)):
+            #     x[batch] = Variable(x[batch] * torch.sigmoid(sf[batch]).repeat(x[batch].size(0)))
+            # Ver4. Avg-pool
+            # out1 = self.module_list[0](x)
+            # out2 = self.module_list[1](x)
+            # x = out1 + out2               # [Batch, 64, 1, 1]
+            # x = x.view(x.size(0), -1)     # [Batch, 64]
 
         if side_fc is False:
             x = self.fc(x)  # [Batch, 64 + self.outplanes] -> [Batch, num_classes]
-            xm = self.fc(xm)
+            # xm = self.fc(xm)
         else:
             x = self.fc_side(x)
 
-        return x, xm
+        return x
 
 def resnet20(pretrained=False, **kwargs):
     n = 3
